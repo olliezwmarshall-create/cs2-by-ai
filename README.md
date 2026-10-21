@@ -1,50 +1,80 @@
-# Breach: Industrial Sector
+# Breach: Dockyard 3D
 
-An original single-player C++17 tactical shooter prototype for 64-bit Windows. Uses a software raycaster, Windows GDI, raw mouse input and real-time synthesized PCM audio. All graphics and sounds are generated in code; no extra assets or installer are needed. This is a small prototype, not Counter-Strike 2 or a photorealistic game.
+An original, offline C++17 tactical shooter prototype for 64-bit Windows. Dockyard now uses a **triangle-based software 3D renderer** with perspective projection, near-plane clipping, and a per-pixel depth buffer. Buildings, cover, characters, grenades, and the planted bomb have 3D geometry. The first-person weapon and interface use screen-space art. No external assets or installer are needed.
 
-## Download and play
+[Download the game folder](https://github.com/olliezwmarshall-create/cs2-by-ai/raw/refs/heads/main/dist/Breach.zip). Extract the ZIP and run **Breach.exe**. Click the window to capture the mouse. Escape releases it and pauses; Escape again quits.
 
-[Download Breach.zip](https://github.com/olliezwmarshall-create/cs2-by-ai/raw/refs/heads/main/dist/Breach.zip), extract the folder, and run `Breach.exe` on Windows.
+## Round objectives
 
-Click the window to capture the mouse. The game pauses when the mouse is released or the window loses focus.
+You fight five AI opponents on a 32×32 Dockyard map, four times the previous map's ground area. It includes two marked bomb courtyards, flanking routes, a middle connector, buildings, overhead structures, and crates.
 
-| Control | Action |
+- **Attack:** Eliminate all defenders, or hold **F** in the yellow A or B bomb-site area for three seconds to plant. Defend the bomb for its 40-second countdown. Enemies can defuse it if you let them reach it for five seconds.
+- **Defend:** Stop the attackers before they plant, or reach the planted device and hold **F** within 1.8 units for five seconds to defuse. Moving, firing, switching guns, throwing a grenade, or releasing F interrupts your own objective interaction. (F blocks shooting while held.)
+- The round lasts 115 seconds before a plant. After planting, the bomb has its own timer. Round timeout favors the defender. Death ends your round.
+- Press **Enter** after a result to begin the next round. Your role alternates each round. Wins and losses accumulate; there is no fixed match length.
+
+## Controls
+
+| Key | Action |
 | --- | --- |
-| W / A / S / D | Move / strafe |
+| WASD | Move / strafe |
 | Mouse | Turn and look up / down |
-| Left click or Space | Fire |
-| Right click (hold) | Aim with zoom and slower movement |
-| R | Reload; animated 1.8-second magazine change |
-| Shift (hold) | Sprint |
-| Left / Right arrow | Alternative turning |
-| Escape | Release mouse; press again to quit |
-| Enter | Restart after victory or defeat |
+| Left click / Space | Fire |
+| Right click (hold) | Aim / zoom; marksman has a scope overlay |
+| Shift | Sprint |
+| R | Reload from your weapon's finite reserve |
+| 1 / 2 / 3 / 4 | Pistol / carbine / SMG / marksman, if owned |
+| F (hold) | Plant / defuse when in range |
+| Q | Cycle frag / smoke / flash |
+| G | Throw selected utility |
+| B | Open / close buy menu in spawn during first 22 seconds |
+| Tab | Show personal kills and match score |
+| Left / Right arrows | Alternative turning |
+| Escape | Release mouse / pause; again to quit |
+| Enter | Start next round after a result |
 
-Eliminate five opponents before your health reaches zero. Enemies take two hits, pursue you when visible, and return fire. Walls block vision and bullets. You have 24 rounds per magazine with unlimited reserve ammunition.
+## Weapons and economy
 
-## New immersion features
+Start with a pistol, $3200, and one of each grenade. A kill awards $300, a round win $3000, and a loss $1900, capped at $16000. Winning preserves purchased guns and armor; losing removes those guns and armor. Magazines, reserves and one of each utility refresh next round.
 
-- Raw mouse look, aim zoom, normalized diagonal movement and sprinting.
-- Textured masonry and paving, distance shading, edge vignette, detailed enemy silhouettes and fallen enemies.
-- Rifle recoil, walking sway, muzzle flashes, player and enemy tracers, impact sparks, hit markers and damage feedback.
-- Visible magazine removal / insertion and timed reload sounds; shooting is blocked until the reload finishes.
-- Mixed procedural gunfire, enemy gunfire, footsteps, empty-magazine clicks, hit feedback and reload / bolt effects. If no audio device is available the game continues silently.
+While the buy menu is open, its numbered choices replace weapon-selection keys:
 
-## Build
+| Buy key | Item | Price | Magazine | Body damage |
+| --- | --- | --- | --- | --- |
+| 1 | Carbine | $2400 | 30 | 35 |
+| 2 | Compact SMG | $1200 | 32 | 24 |
+| 3 | Marksman | $3500 | 5 | 100 |
+| 4 | Armor | $650 | — | Reduces incoming gun damage |
+| 5 | Utility refill | $300 | — | Adds one of each, maximum two |
 
-On Linux with MinGW-w64 installed:
+Your free pistol holds 12 rounds and deals 34 body damage. Weapons have different fire rates, ranges, spreads and reload times. Headshots deal triple damage; moving and sustained fire widen spread, and aiming narrows it. Every gun keeps its own ammo. Switching cancels a reload. Buying does not pause combat.
+
+## AI and utilities
+
+Bots use grid pathfinding around walls and crates, share nearby sightings, investigate audible gunfire, strafe in combat, and reload their magazines. Defenders respond to planted bombs; attackers can navigate to either site and plant when they are not engaging you. Smoke interrupts their sight, and flash grenades temporarily blind them. This is a single-player prototype with probabilistic AI accuracy, not competitive multiplayer AI.
+
+- **Frag:** Bouncing projectile; explodes after 1.25 seconds, dealing damage in line of sight. Can hurt you.
+- **Smoke:** Creates a 12-second smoke cloud that blocks AI visibility. Bullets still pass through it.
+- **Flash:** Blinds nearby bots in line of sight for four seconds. Can white out your screen if you face the blast.
+
+Procedural gunfire, footsteps, reload clicks, grenade blasts, bomb beeps, recoil, muzzle flashes, tracers, damage feedback and weapon sway are retained. No audio device means silent play.
+
+## Build and validation
 
 ```sh
+# Windows cross-build with MinGW-w64
 ./build.sh
-```
+# For an extracted toolchain, set CXX to its x86_64-w64-mingw32-g++-posix.
 
-For an extracted toolchain, set `CXX` to its `x86_64-w64-mingw32-g++-posix` executable. The build statically links compiler runtimes and uses standard Windows system DLLs including `winmm.dll`.
-
-## Validate
-
-```sh
-g++ -std=c++17 -O2 -Wall -Wextra -pedantic main.cpp -o /tmp/breach-tests
+# Portable gameplay and software-renderer tests
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic main.cpp -o /tmp/breach-tests
 /tmp/breach-tests /tmp/breach.ppm
+
+# Optional memory / undefined-behavior checks
+g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer main.cpp -o /tmp/breach-sanitized
+/tmp/breach-sanitized
 ```
 
-Checks cover collision, hits, tracers, victory, damage, reload timing and fire blocking, wall occlusion, empty-fire behavior, angle wrapping, rendering and camera changes. The optional PPM output captures the software renderer. Windows mouse input, audio playback and window presentation require a Windows play test; they have not been runtime-tested in the Linux build environment.
+Tests exercise map connectivity, spawn collision, economy, independent weapons, head/body hits, cover, finite reloads, planting, interruptions, bot planting/defusing, bomb and round timers, result accounting, all three utilities, AI navigation/hearing, triangle rendering, depth occlusion, and camera projection. The optional PPM is a current rendered scene.
+
+Windows mouse capture, input, audio playback, and window presentation still require a Windows play test; these were cross-compiled but not runtime-tested in this Linux environment. The art is deliberately simple low-poly geometry. There is no networking, licensed Counter-Strike content, imported character animation, or photorealistic rendering.
