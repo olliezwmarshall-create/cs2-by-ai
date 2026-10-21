@@ -349,9 +349,10 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
       keys[w] = false;
     return 0;
   case WM_LBUTTONDOWN:
-    if (captured && ui.page == ScreenPage::Play)
+    if (captured && ui.page == ScreenPage::Play) {
       mouse = true;
-    else {
+      pressPending = true;
+    } else {
       auto p = cursorPosition(win, l);
       auto before = ui.page;
       draggingSlider = ui.slider(p.x, p.y);
@@ -504,6 +505,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
   RAWINPUTDEVICE rid = {0x01, 0x02, 0, win};
   RegisterRawInputDevices(&rid, 1, sizeof(rid));
   Audio audio;
+  // Sleep(1) can otherwise round up to a whole coarse Windows timer tick.
+  struct TimerPeriod {
+    bool active = timeBeginPeriod(1) == TIMERR_NOERROR;
+    ~TimerPeriod() {
+      if (active)
+        timeEndPeriod(1);
+    }
+  } timerPeriod;
   LARGE_INTEGER freq, last, now;
   QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&last);
@@ -530,7 +539,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     }
     syncFullscreen(win);
     syncCapture(win);
-    aimBlend += (double(aiming) - aimBlend) * std::min(1., dt * 12);
+    aimBlend += (double(aiming) - aimBlend) * (1 - std::exp(-12 * dt));
     bool held = mouse;
     if (ui.simulates() && GetForegroundWindow() == win) {
       pressPending = pressPending || (held && !fireWasDown);
@@ -553,7 +562,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         }
         game.tick(fixed);
         if (ui.page == ScreenPage::Play)
-          game.trigger(held, pressPending);
+          game.trigger(held || pressPending, pressPending);
         pressPending = false;
         accumulator -= fixed;
       }

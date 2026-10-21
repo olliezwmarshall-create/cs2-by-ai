@@ -474,7 +474,105 @@ int main(int argc, char **argv) {
   assert(g.jumpHeight > 0);
   simulate(g, 1);
   assert(g.jumpHeight == 0);
-  // Downloaded CC0 geometry actually loads UVs and non-flat texture images.
+  // Held rifle fire follows a repeatable climb/weave regardless of the
+  // random spread seed; counter-steering the view keeps the muzzle on target.
+  auto spray = [](uint32_t seed, bool compensate) {
+    Game trial = lane();
+    trial.weapon = 1;
+    trial.owned[1] = true;
+    trial.random = seed;
+    std::vector<Vec> directions;
+    for (int n = 0; n < 20; n++) {
+      if (compensate) {
+        trial.a = -trial.recoilYaw;
+        trial.pitch = -trial.recoilPitch;
+      }
+      trial.fire();
+      const auto &t = trial.tracers.back();
+      Vec ray = t.to - t.from;
+      directions.push_back(ray * (1 / length(ray)));
+      trial.tick(trial.gun().delay);
+    }
+    assert(trial.magazines[1] == 10 && trial.sprayShot == 20);
+    assert(trial.recoilPitch > .05);
+    assert(std::abs(trial.viewPitch() - trial.pitch - trial.recoilPitch) <
+           1e-9);
+    simulate(trial, 1);
+    assert(trial.sprayShot == 0 && std::abs(trial.recoilPitch) < .0001 &&
+           std::abs(trial.recoilYaw) < .0001 &&
+           std::abs(trial.weaponKick) < .0001);
+    return directions;
+  };
+  auto rising = spray(13, false), compensated = spray(13, true),
+       alternate = spray(99, false);
+  assert(rising.back().z > rising.front().z + .04);
+  assert(std::abs(compensated.back().z) < .02);
+  assert(rising[19].y - compensated[19].y >
+         rising[10].y - compensated[10].y + .015);
+  assert(std::abs(rising[15].z - alternate[15].z) < .025);
+  // The same elapsed movement at different fixed update rates has similar
+  // distance, gait and aim recovery. Small substeps must still count as
+  // walking.
+  auto travel = [](double dt) {
+    Game trial = lane();
+    for (int i = 0; i < int(1 / dt); i++) {
+      trial.locomotion(dt, 1, .5, false, false);
+      trial.tick(dt);
+    }
+    assert(trial.walking && trial.moveBlend > .9 && trial.walkPhase > 10);
+    for (int i = 0; i < int(.5 / dt); i++) {
+      trial.locomotion(dt, 0, 0, false, false);
+      trial.tick(dt);
+    }
+    assert(!trial.walking && trial.moveBlend < .05 && trial.vx == 0 &&
+           trial.vy == 0);
+    return Vec{trial.x, trial.y, trial.walkPhase};
+  };
+  Vec coarse = travel(1. / 60), fine = travel(1. / 240);
+  assert(dist(coarse.x, coarse.y, fine.x, fine.y) < .06);
+  double springX = .3, springV = 4, subdividedX = springX,
+         subdividedV = springV;
+  spring(springX, springV, 0, 25, .1);
+  for (int i = 0; i < 24; i++)
+    spring(subdividedX, subdividedV, 0, 25, .1 / 24);
+  assert(std::abs(springX - subdividedX) < 1e-10 &&
+         std::abs(springV - subdividedV) < 1e-10);
+  // Scoped weapons have only their lens reticle, at either aim state. Normal
+  // guns retain a hip-fire crosshair and utility does not display one.
+  game = lane();
+  for (int gun : {3, 4, 14})
+    for (double blend : {0., 1.}) {
+      game.weapon = gun;
+      aimBlend = blend;
+      std::fill(pixels.begin(), pixels.end(), 0x123456);
+      drawAimIndicators();
+      assert(std::all_of(pixels.begin(), pixels.end(),
+                         [](uint32_t c) { return c == 0x123456; }));
+    }
+  game.weapon = 0;
+  drawAimIndicators();
+  assert(pixels[H / 2 * W + W / 2 + 8] != 0x123456);
+  // A billboard uses the supplied camera, independent of the player's world
+  // heading. This also protects viewmodels and the magnified lens pass.
+  Camera fixedCamera({0, 0, 0}, 0, 0);
+  auto beamImage = [&](double heading) {
+    game.a = heading;
+    std::fill(pixels.begin(), pixels.end(), 0);
+    std::fill(zbuffer.begin(), zbuffer.end(), 0);
+    activeMaterial = 0;
+    beam({3, -.15, 0}, {4, .15, .1}, .04, 0xABCDEF, fixedCamera);
+    return pixels;
+  };
+  assert(beamImage(0) == beamImage(2));
+  // Completing a reload returns continuously to the resting pose.
+  game = lane();
+  game.reload = .00001;
+  Vec almostRest = WeaponModel().point({.4, .1, .1});
+  game.reload = 0;
+  Vec rest = WeaponModel().point({.4, .1, .1});
+  assert(length(almostRest - rest) < .00001);
+  // Downloaded licensed geometry actually loads UVs and non-flat texture
+  // images.
   assert(loadArt("assets"));
   assert(lanternArt.faces.size() > 1000 && bottleArt.faces.size() > 1000 &&
          truckArt.faces.size() > 1000);
@@ -528,6 +626,41 @@ int main(int argc, char **argv) {
     assert(*std::max_element(zbuffer.begin(), zbuffer.end()) > 0);
   }
   selectMap(0);
+  // Filtered texture sampling wraps correctly and blends four texels.
+  TextureImage checker;
+  checker.w = checker.h = 2;
+  checker.pixels = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFFFF};
+  assert(checker.sample(.25, .25) == 0xFF0000);
+  assert(checker.sample(.5, .5) == 0x7F7F7F);
+  assert(checker.sample(-.75, 1.25) == 0xFF0000);
+  assert(std::abs(textures.sample({1, 2, 0}, {0, 0, 1}, 1, 7) -
+                  textures.sample({1.38, 2.77, 0}, {0, 0, 1}, 1, 7)) < 1e-6);
+  // Check optimized scanline coverage and perspective depth against direct
+  // barycentric evaluation, for both triangle windings and offscreen edges.
+  for (bool reverse : {false, true}) {
+    Vec a{-.8, -.7, 1.5}, b{1.2, -.3, 4}, c{.1, .9, 2.2};
+    if (reverse)
+      std::swap(a, c);
+    std::fill(zbuffer.begin(), zbuffer.end(), 0);
+    raster(a, b, c, 0xEEEEEE);
+    auto p = screen(a), q = screen(b), r = screen(c);
+    double area = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    for (int y = 0; y < H; y += 3)
+      for (int x = 0; x < W; x += 3) {
+        double u = ((q.x - x - .5) * (r.y - y - .5) -
+                    (q.y - y - .5) * (r.x - x - .5)) /
+                   area;
+        double v = ((r.x - x - .5) * (p.y - y - .5) -
+                    (r.y - y - .5) * (p.x - x - .5)) /
+                   area;
+        double w = 1 - u - v;
+        if (std::min({u, v, w}) > .00002)
+          assert(std::abs(zbuffer[y * W + x] -
+                          (u * p.iz + v * q.iz + w * r.iz)) < 1e-8);
+        if (std::min({u, v, w}) < -.00002)
+          assert(zbuffer[y * W + x] == 0);
+      }
+  }
   // Near-plane clipping and depth ordering remain correct with textured meshes.
   std::fill(pixels.begin(), pixels.end(), 0);
   std::fill(zbuffer.begin(), zbuffer.end(), 0);
@@ -566,6 +699,8 @@ int main(int argc, char **argv) {
        "utility persistence, burst/pellet/automatic cadence, armor, "
        "drops/pickups, bomb/timers, harder AI, autonomous rounds, mouse menus, "
        "movement, licensed UV assets, 3D animations/viewmodels, transparent "
-       "picture-in-picture scopes, depth and UI layouts");
+       "picture-in-picture scopes, recoil compensation/recovery, motion at "
+       "different update rates, sniper crosshairs, texture filtering, camera "
+       "billboards, scanline coverage, depth and UI layouts");
   return 0;
 }

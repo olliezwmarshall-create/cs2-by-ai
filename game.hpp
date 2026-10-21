@@ -19,6 +19,18 @@ double dist(double x, double y, double xx, double yy) {
   return std::hypot(x - xx, y - yy);
 }
 double wrap(double a) { return atan2(sin(a), cos(a)); }
+double smoothRange(double lo, double hi, double value) {
+  double t = std::clamp((value - lo) / (hi - lo), 0., 1.);
+  return t * t * (3 - 2 * t);
+}
+// Exact critically damped spring: stable at any update rate.
+void spring(double &position, double &velocity, double target, double omega,
+            double dt) {
+  double offset = position - target, c = velocity + omega * offset;
+  double decay = std::exp(-omega * dt);
+  position = target + (offset + c * dt) * decay;
+  velocity = (velocity - omega * c * dt) * decay;
+}
 Vec HOME_T{5, 40, 0}, HOME_CT{75, 40, 0}, SITE_A{70, 14, 0}, SITE_B{70, 66, 0};
 constexpr int WEAPON_COUNT = 16;
 bool secondaryGun(int gun) { return gun == 0 || (gun >= 5 && gun <= 7); }
@@ -314,6 +326,23 @@ const std::array<Weapon, WEAPON_COUNT> weapons = {
      {"BELT MACHINE GUN", 80, 30, 4500, .085, 4.2, .035, 65, true},
      {"LIGHT SNIPER", 10, 80, 2000, 1., 2.3, .002, 90, false},
      {"COMPACT PDW", 50, 22, 1900, .055, 2.4, .024, 42, true}}};
+// Repeatable spray control points in radians. First-shot accuracy is kept;
+// this is the aim kick applied after each shot. Horizontal control opens up
+// after the initial climb, and long magazines continue a bounded weave.
+Vec recoilPattern(int gun, int shot) {
+  static constexpr double strength[WEAPON_COUNT] = {
+      .75, 1.,   .58, 2.8, 1.8,  1.9, .45, .55,
+      .72, 1.45, .82, 2.4, 1.65, .90, 2.,  .48};
+  int n = std::max(0, shot);
+  double climb = std::min(n + 1, 11) * .006;
+  double lateral =
+      n < 4 ? n * .00025
+            : .017 * std::sin((n - 4) * .42) - .009 * std::sin((n - 4) * .19);
+  if (secondaryGun(gun) || scopedGun(gun) || gun == 11 || gun == 12)
+    climb = std::min(n + 1, 5) * .007;
+  double scale = strength[gun];
+  return {lateral * scale * (gun % 2 ? -1 : 1), climb * scale, 0};
+}
 struct Bot {
   double x, y;
   int hp = 100;
@@ -330,6 +359,7 @@ struct Bot {
   double coverX = 0, coverY = 0, senseTimer = 0, senseX = 0, senseY = 0;
   std::string state = "ADVANCE";
   double deathTime = -1, walkPhase = 0, locomotion = 0;
+  double poseFacing = 0, poseSpeed = 0, objectivePose = 0;
   int armor = 70;
 };
 struct Tracer {
@@ -379,6 +409,10 @@ struct Game {
   bool matchOver = false, matchWon = false, startAttacker = true,
        playerDropped = false, utilityEquipped = false;
   double visualTime = 0, equipAnim = 0;
+  double recoilYaw = 0, recoilPitch = 0, sinceShot = 10;
+  double weaponKick = 0, kickVelocity = 0, moveBlend = 0, sprintBlend = 0,
+         walkPhase = 0;
+  int sprayShot = 0;
   int primary = -1, secondary = 0, burstRemaining = 0;
   std::array<bool, WEAPON_COUNT> owned{{true}};
   std::array<int, WEAPON_COUNT> magazines{}, reserve{};
@@ -415,6 +449,10 @@ struct Game {
     utilityEquipped = false;
     burstRemaining = 0;
     equipAnim = 0;
+    recoilYaw = recoilPitch = weaponKick = kickVelocity = 0;
+    moveBlend = sprintBlend = walkPhase = 0;
+    sprayShot = 0;
+    sinceShot = 10;
     drops.clear();
     a = attacker ? -PI / 2 : PI / 2;
     pitch = shot = muzzle = reload = time = hurt = hit = recoil = steps =
@@ -446,7 +484,7 @@ struct Game {
         bot.role = i;
         bot.gun = i == 4 ? 3 : i == 1 ? 15 : i == 2 ? 8 : i == 3 ? 9 : 1;
         bot.ammo = weapons[bot.gun].capacity;
-        bot.facing = team ? 0 : PI;
+        bot.facing = bot.poseFacing = team ? 0 : PI;
         bot.cooldown = .5 + i * .12;
         bots.push_back(bot);
       }
@@ -539,7 +577,8 @@ struct Game {
         y += dy / n;
     }
     double distance = dist(x, y, ox, oy);
-    walking = distance > .001;
+    walking = distance > 1e-7;
+    walkPhase += distance * 7;
     steps += distance;
     if (distance > .005)
       plantProgress = defuseProgress = 0;
@@ -555,7 +594,7 @@ struct Game {
       walking = false;
       return;
     }
-    stance += std::clamp((crouch ? 1. : 0.) - stance, -dt * 6, dt * 6);
+    stance += ((crouch ? 1. : 0.) - stance) * (1 - std::exp(-12 * dt));
     sprinting = sprint && !ads && !crouch;
     double speed = crouch ? 1.25 : sprinting ? 3.7 : ads ? 1.45 : 2.6;
     double n = std::max(1., hypot(forward, side));
@@ -564,13 +603,16 @@ struct Game {
     double tx = cos(a) * forward - sin(a) * side,
            ty = sin(a) * forward + cos(a) * side;
     double acceleration = (forward != 0 || side != 0) ? 18 : 25;
-    auto approach = [&](double value, double target) {
-      return value +
-             std::clamp(target - value, -acceleration * dt, acceleration * dt);
-    };
-    vx = approach(vx, tx);
-    vy = approach(vy, ty);
+    double delta = hypot(tx - vx, ty - vy);
+    double blend = delta > 0 ? std::min(1., acceleration * dt / delta) : 1;
+    vx += (tx - vx) * blend;
+    vy += (ty - vy) * blend;
+    double oldX = x, oldY = y;
     move(vx * dt, vy * dt);
+    if (std::abs(x - oldX) < 1e-8)
+      vx = 0;
+    if (std::abs(y - oldY) < 1e-8)
+      vy = 0;
   }
   void jump() {
     if (hp > 0 && !ended && freeze <= 0 && jumpHeight <= 0 && stance < .2)
@@ -692,6 +734,8 @@ struct Game {
         boltCycle > 0)
       return;
     weapon = i;
+    sprayShot = 0;
+    sinceShot = 10;
     utilityEquipped = false;
     burstRemaining = 0;
     equipAnim = .3;
@@ -704,6 +748,8 @@ struct Game {
         ammo() == gun().capacity || reserve[weapon] <= 0)
       return;
     reload = gun().reload;
+    sprayShot = 0;
+    sinceShot = 10;
     utilityEquipped = false;
     burstRemaining = 0;
     sounds.push_back(MagOut);
@@ -752,8 +798,8 @@ struct Game {
                     (ads ? .4 : 1) * (1 + recoil * .4);
     Vec origin = {x, y, 1.6 - stance * .5 + jumpHeight};
     for (int pellet = 0; pellet < pellets; pellet++) {
-      Vec dir =
-          direction(a + (rng() - .5) * spread, pitch + (rng() - .5) * spread);
+      Vec dir = direction(a + recoilYaw + (rng() - .5) * spread,
+                          pitch + recoilPitch + (rng() - .5) * spread);
       double nearest = geometry(origin, dir, gun().range);
       int target = -1;
       bool head = false;
@@ -794,6 +840,13 @@ struct Game {
                          {-sin(a) * 1.7, cos(a) * 1.7, 1.1},
                          1.,
                          0xC7A65C});
+    Vec kick = recoilPattern(weapon, sprayShot);
+    Vec previous = sprayShot > 0 ? recoilPattern(weapon, sprayShot - 1) : Vec{};
+    recoilYaw += kick.x - previous.x;
+    recoilPitch += kick.y - previous.y;
+    sprayShot++;
+    sinceShot = 0;
+    kickVelocity += (boltGun(weapon) || weapon == 11) ? 15 : 9;
     checkElimination();
   }
   void trigger(bool held, bool pressed) {
@@ -890,8 +943,9 @@ struct Game {
   }
   double viewAngle() const {
     int i = spectating();
-    return i >= 0 ? bots[i].facing : a;
+    return i >= 0 ? bots[i].facing : a + recoilYaw;
   }
+  double viewPitch() const { return hp > 0 ? pitch + recoilPitch : 0; }
   void tickBots(double dt);
   int site(double xx, double yy) const {
     if (dist(xx, yy, SITE_A.x, SITE_A.y) < 4)
@@ -964,6 +1018,19 @@ struct Game {
       freeze = std::max(0., freeze - dt);
       return;
     }
+    sinceShot += dt;
+    if (sinceShot > std::max(.18, gun().delay * 1.25)) {
+      double decay = std::exp(-10 * dt);
+      recoilYaw *= decay;
+      recoilPitch *= decay;
+    }
+    if (sinceShot > std::max(.3, gun().delay * 1.5))
+      sprayShot = 0;
+    spring(weaponKick, kickVelocity, 0, 25, dt);
+    moveBlend += (std::clamp(hypot(vx, vy) / 2.6, 0., 1.) - moveBlend) *
+                 (1 - std::exp(-10 * dt));
+    sprintBlend += ((sprinting && walking ? 1. : 0.) - sprintBlend) *
+                   (1 - std::exp(-9 * dt));
     if (jumpVelocity != 0 || jumpHeight > 0) {
       jumpVelocity -= 9.8 * dt;
       jumpHeight += jumpVelocity * dt;

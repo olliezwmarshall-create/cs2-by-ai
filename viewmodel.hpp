@@ -11,22 +11,24 @@ struct WeaponModel {
         scale(size) {}
   WeaponModel() {
     double phase = game.reload > 0 ? 1 - game.reload / game.gun().reload : 0;
-    double anim = sin(phase * PI);
-    yaw = -anim * .35 + (game.sprinting ? .13 : 0) +
-          (moving ? sin(game.time * 5.5) * .015 : 0);
-    roll = anim * .7;
-    pitch =
-        anim * .35 +
-        game.recoil * (scopedGun(game.weapon) && aimBlend > .8 ? .005 : .07) -
-        (game.sprinting ? .16 : 0);
+    double anim = smoothRange(0, .20, phase) * (1 - smoothRange(.76, 1, phase));
+    double gait = game.moveBlend * (1 - aimBlend * .92),
+           breathing =
+               std::sin(game.visualTime * 1.65) * .0015 * (1 - aimBlend * .8);
+    yaw = -anim * .24 + game.sprintBlend * .13 +
+          std::sin(game.walkPhase) * .009 * gait;
+    roll = anim * .48 + std::sin(game.walkPhase) * .012 * gait;
+    pitch = anim * .26 +
+            game.weaponKick *
+                (scopedGun(game.weapon) && aimBlend > .8 ? .018 : .20) -
+            game.sprintBlend * .16;
     offset = {.22 * (scopedGun(game.weapon) ? 1 - aimBlend : 1) -
-                  game.recoil * .02,
-              .22 * (1 - aimBlend),
+                  game.weaponKick * .12,
+              .22 * (1 - aimBlend) + std::sin(game.walkPhase) * .004 * gait,
               -.32 + (scopedGun(game.weapon) ? .13 : .17) * aimBlend};
-    offset.z -= game.equipAnim * .6;
-    offset.z -= anim * .18;
-    if (moving)
-      offset.z += sin(game.time * 11) * .008;
+    offset.z -= smoothRange(0, .3, game.equipAnim) * .18;
+    offset.z -= anim * .12;
+    offset.z += std::sin(game.walkPhase * 2) * .006 * gait + breathing;
   }
   Vec point(Vec p) const {
     p = p * scale;
@@ -101,13 +103,14 @@ void paintWeapon(WeaponModel &m, int gun, bool animate) {
   double phase = animate && game.reload > 0
                      ? 1 - game.reload / weapons[gun].reload
                      : 0,
-         mag = sin(phase * PI) * .38;
+         mag = (smoothRange(.16, .36, phase) - smoothRange(.60, .82, phase)) *
+               .38;
   if (secondaryGun(gun)) {
     double length = gun == 5   ? .43
                     : gun == 6 ? .28
                                : .36,
            width = gun == 5 ? .13 : .10,
-           slide = animate && game.muzzle > 0 ? -.045 : 0;
+           slide = animate ? -game.weaponKick * .19 : 0;
     m.box({.25, -width * .4, -.22, .10, width * .8, .22, black});
     m.box({.26 + slide, -width * .5, -.015, length, width, .09,
            gun == 5   ? 0xB6B2A4
@@ -206,14 +209,32 @@ void drawViewmodel() {
   int previous = activeMaterial;
   activeMaterial = 4;
   WeaponModel m;
-  segment(m.point({0, -.16, -.30}), m.point({.36, -.12, -.22}), .085, .065,
+  double phase = game.reload > 0 ? 1 - game.reload / game.gun().reload : 0;
+  double reach =
+      smoothRange(.10, .28, phase) * (1 - smoothRange(.82, 1, phase));
+  double mag =
+      (smoothRange(.16, .36, phase) - smoothRange(.60, .82, phase)) * .38;
+  double mx = secondaryGun(game.weapon) ? .28 : game.weapon == 10 ? .18 : .48;
+  Vec support = Vec{.66, .045, -.09} * (1 - reach) +
+                Vec{mx - mag * .2, .02, -.30 - mag} * reach;
+  Vec grip{.30, -.025, -.18};
+  if (boltGun(game.weapon) && game.boltCycle > 0) {
+    double cycle = std::sin((1 - game.boltCycle / .8) * PI);
+    grip = grip * (1 - cycle) + Vec{.40 - cycle * .11, .15, .035} * cycle;
+  }
+  segment(m.point({0, -.16, -.38}), m.point({.18, -.13, -.29}), .085, .075,
           0x36443A, m.camera);
-  segment(m.point({.1, .13, -.34}), m.point({.43, .06, -.22}), .09, .065,
+  segment(m.point({.18, -.13, -.29}), m.point(grip), .075, .06, 0xAE8E70,
+          m.camera);
+  segment(m.point({.03, .19, -.40}),
+          m.point({.30 - reach * .12, .16, -.24 - mag * .6}), .09, .075,
           0x36443A, m.camera);
-  segment(m.point({.34, -.12, -.22}), m.point({.46, -.08, -.18}), .07, .065,
-          0xAE8E70, m.camera);
-  segment(m.point({.39, .06, -.22}), m.point({.48, .035, -.18}), .07, .065,
-          0xAE8E70, m.camera);
+  segment(m.point({.30 - reach * .12, .16, -.24 - mag * .6}), m.point(support),
+          .075, .055, 0xAE8E70, m.camera);
+  segment(m.point(grip), m.point(grip + Vec{.05, 0, .015}), .067, .062,
+          0x36443A, m.camera);
+  segment(m.point(support), m.point(support + Vec{.05, 0, .025}), .064, .055,
+          0x36443A, m.camera);
   if (game.utilityEquipped) {
     m.cylinder(.3, .47, 0, -.03, .09,
                game.utility == 0   ? 0x678044

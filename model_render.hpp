@@ -31,7 +31,8 @@ void texturedTriangle(Vec a, Vec b, Vec c, Vec ta, Vec tb, Vec tc,
   for (size_t i = 1; i + 1 < out.size(); i++) {
     std::array<Vec, 3> wp = {out[0].w, out[i].w, out[i + 1].w},
                        uv = {out[0].uv, out[i].uv, out[i + 1].uv};
-    raster(out[0].p, out[i].p, out[i + 1].p, 0xFFFFFF, &wp, n, 0, &uv, &image);
+    raster(out[0].p, out[i].p, out[i + 1].p, 0xFFFFFF, &wp, n, 0, &uv, &image,
+           camera.origin);
   }
 }
 void drawArt(const ArtMesh &mesh, Vec origin, double scale, double heading,
@@ -109,14 +110,16 @@ void drawCharacter(const Bot &b, int id, const Camera &camera) {
       b.hp > 0 ? 0 : std::clamp((game.visualTime - b.deathTime) / .65, 0., 1.);
   double lean = death * PI * .48;
   double stride =
-      b.hp > 0 ? sin(b.walkPhase) * std::min(.22, b.locomotion * .1) : 0;
+      b.hp > 0 ? sin(b.walkPhase) * std::min(.22, b.poseSpeed * .1) : 0;
   auto point = [&](Vec p) {
-    if (b.plant > 0)
-      p.z -= .30;
+    p.z -= .30 * b.objectivePose;
+    p.x += (p.z - .8) * .05 * std::min(1., b.poseSpeed / 2.25);
+    p.z += std::sin(b.walkPhase * 2) * .012 * std::min(1., b.poseSpeed);
     double z = p.z * cos(lean) - p.x * sin(lean),
            x = p.x * cos(lean) + p.z * sin(lean);
-    return Vec{b.x + x * cos(b.facing) - p.y * sin(b.facing),
-               b.y + x * sin(b.facing) + p.y * cos(b.facing), std::max(.08, z)};
+    return Vec{b.x + x * cos(b.poseFacing) - p.y * sin(b.poseFacing),
+               b.y + x * sin(b.poseFacing) + p.y * cos(b.poseFacing),
+               std::max(.08, z)};
   };
   unsigned cloth = b.terrorist ? 0x9B8864 : 0x4B7085, vest = 0x34423F,
            skin = 0xBBA384;
@@ -126,13 +129,15 @@ void drawCharacter(const Bot &b, int id, const Camera &camera) {
   segment(point({.04, 0, .92}), point({.05, 0, 1.30}), .23, .25, vest, camera);
   for (int side : {-1, 1}) {
     double swing = stride * side;
+    double lift = std::max(0., std::cos(b.walkPhase) * side) * .12 *
+                  std::min(1., b.poseSpeed / 2.25);
     Vec hip = point({0, side * .125, .82}),
-        knee = point({swing, side * .13, .46}),
-        foot = point({-swing, side * .13, .13});
+        knee = point({swing * .5 + .04, side * .13, .46 + lift * .4}),
+        foot = point({swing, side * .13, .13 + lift});
     segment(hip, knee, .12, .095, cloth, camera);
     segment(knee, foot, .095, .075, cloth, camera);
-    segment(foot, point({.16 - swing, side * .13, .11}), .10, .11, 0x253137,
-            camera);
+    segment(foot, point({.16 + swing, side * .13, .11 + lift}), .10, .11,
+            0x253137, camera);
     Vec shoulder = point({0, side * .24, 1.35}),
         elbow = point({.19, side * .29, 1.1}),
         hand = point(

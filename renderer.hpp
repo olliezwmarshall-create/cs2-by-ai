@@ -48,8 +48,7 @@ double focal() {
 struct Camera {
   double ca, sa, cp, sp;
   Vec origin;
-  Camera()
-      : Camera(game.eye(), game.viewAngle(), game.hp > 0 ? game.pitch : 0) {}
+  Camera() : Camera(game.eye(), game.viewAngle(), game.viewPitch()) {}
   Camera(Vec eye, double angle, double pitch)
       : ca(cos(angle)), sa(sin(angle)), cp(cos(pitch)), sp(sin(pitch)),
         origin(eye) {}
@@ -107,6 +106,7 @@ ShadowField shadowField;
 struct TextureTiles {
   static constexpr int N = 128;
   std::array<std::array<double, N * N>, 8> tiles{};
+  std::array<std::array<std::vector<float>, 8>, 8> mips;
   TextureTiles() {
     for (int m = 0; m < 8; m++)
       for (int y = 0; y < N; y++)
@@ -144,19 +144,43 @@ struct TextureTiles {
             value *= .96 + .04 * fract(u * 11 + v * 7);
           tiles[m][y * N + x] = value;
         }
+    for (int m = 0; m < 8; m++) {
+      mips[m][0].assign(tiles[m].begin(), tiles[m].end());
+      for (int level = 1; level < 8; level++) {
+        int n = N >> level, old = n * 2;
+        auto &out = mips[m][level];
+        const auto &in = mips[m][level - 1];
+        out.resize(n * n);
+        for (int y = 0; y < n; y++)
+          for (int x = 0; x < n; x++)
+            out[y * n + x] =
+                (in[y * 2 * old + x * 2] + in[y * 2 * old + x * 2 + 1] +
+                 in[(y * 2 + 1) * old + x * 2] +
+                 in[(y * 2 + 1) * old + x * 2 + 1]) *
+                .25f;
+      }
+    }
   }
-  double sample(Vec p, Vec normal, int material) const {
+  double sample(Vec p, Vec normal, int material, int level) const {
     double u = std::abs(normal.x) > .6 ? p.y : p.x,
            v = std::abs(normal.z) < .6 ? p.z : p.y;
-    double scale = material == 1 ? 64 : 128;
-    int x = int(u * scale) & 127, y = int(v * 128) & 127;
-    return tiles[material][y * N + x];
+    int n = N >> level;
+    int sx = int(u * (material == 1 ? 16384 : 32768)) >> level,
+        sy = int(v * 32768) >> level;
+    int ix = sx >> 8, iy = sy >> 8;
+    float fx = (sx & 255) * (1.f / 256), fy = (sy & 255) * (1.f / 256);
+    const float *tile = mips[material][level].data();
+    int x0 = ix & (n - 1), x1 = (ix + 1) & (n - 1), y0 = (iy & (n - 1)) * n,
+        y1 = ((iy + 1) & (n - 1)) * n;
+    float top = tile[y0 + x0] + (tile[y0 + x1] - tile[y0 + x0]) * fx,
+          bottom = tile[y1 + x0] + (tile[y1 + x1] - tile[y1 + x0]) * fx;
+    return top + (bottom - top) * fy;
   }
 };
 const TextureTiles textures;
-double materialValue(Vec p, Vec normal, int material) {
+inline double materialValue(Vec p, Vec normal, int material, int level) {
   double value = textures.sample(
-      p, normal, material == 2 ? (arena.id == 0 ? 7 : 2) : material);
+      p, normal, material == 2 ? (arena.id == 0 ? 7 : 2) : material, level);
   if (material == 2)
     value *= shadowField.sample(p.x, p.y);
   if (material == 1 && p.z < .2)
@@ -167,7 +191,7 @@ double materialValue(Vec p, Vec normal, int material) {
 void raster(Vec a, Vec b, Vec c, unsigned color,
             const std::array<Vec, 3> *world = nullptr, Vec normal = {},
             int material = 0, const std::array<Vec, 3> *uv = nullptr,
-            const TextureImage *image = nullptr) {
+            const TextureImage *image = nullptr, Vec viewOrigin = {}) {
   auto p = screen(a), q = screen(b), r = screen(c);
   double area = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
   if (std::abs(area) < .01)
@@ -185,7 +209,7 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
   double specular = 0;
   if (world && (material == 4 || image)) {
     Vec center = ((*world)[0] + (*world)[1] + (*world)[2]) * (1. / 3),
-        eye = game.eye() - center;
+        eye = viewOrigin - center;
     double l = length(eye);
     if (l > .001) {
       Vec half = eye * (1 / l) + Vec{.48, -.38, .8};
@@ -198,6 +222,9 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
                    32;
     }
   }
+  int textureLevel = std::clamp(
+      int(std::log2(std::max(1., (a.z + b.z + c.z) * 128 / (3 * focal())))), 0,
+      7);
   double inverseArea = 1 / area;
   double u0 = ((q.x - minx - .5) * (r.y - miny - .5) -
                (q.y - miny - .5) * (r.x - minx - .5)) *
@@ -207,41 +234,68 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
               inverseArea;
   double ux = (q.y - r.y) * inverseArea, uy = (r.x - q.x) * inverseArea;
   double vx = (r.y - p.y) * inverseArea, vy = (p.x - r.x) * inverseArea;
+  const auto *attributes = uv ? uv : world;
+  Vec attributeStep{};
+  if (attributes)
+    attributeStep = (*attributes)[0] * (ux * p.iz) +
+                    (*attributes)[1] * (vx * q.iz) +
+                    (*attributes)[2] * ((-ux - vx) * r.iz);
+  double depthStep = ux * p.iz + vx * q.iz + (-ux - vx) * r.iz;
   for (int y = miny; y <= maxy; y++) {
     double u = u0 + (y - miny) * uy, v = v0 + (y - miny) * vy;
-    for (int x = minx; x <= maxx; x++, u += ux, v += vx) {
-      double w = 1 - u - v;
-      if (u < -.00001 || v < -.00001 || w < -.00001)
-        continue;
-      double iz = u * p.iz + v * q.iz + w * r.iz;
+    // Intersect this scanline with the three barycentric half-planes.
+    // This avoids visiting the empty part of each triangle's bounding box.
+    double left = 0, right = maxx - minx;
+    auto clipSpan = [&](double value, double step) {
+      if (std::abs(step) < 1e-15) {
+        if (value < -.00001)
+          right = -1;
+      } else if (step > 0)
+        left = std::max(left, (-.00001 - value) / step);
+      else
+        right = std::min(right, (-.00001 - value) / step);
+    };
+    clipSpan(u, ux);
+    clipSpan(v, vx);
+    clipSpan(1 - u - v, -ux - vx);
+    if (left > right)
+      continue;
+    int first = std::max(0, int(std::ceil(left))),
+        last = std::min(maxx - minx, int(std::floor(right)));
+    u += first * ux;
+    v += first * vx;
+    double w = 1 - u - v;
+    double iz = u * p.iz + v * q.iz + w * r.iz;
+    Vec attribute{};
+    if (attributes)
+      attribute = (*attributes)[0] * (u * p.iz) +
+                  (*attributes)[1] * (v * q.iz) + (*attributes)[2] * (w * r.iz);
+    for (int x = minx + first; x <= minx + last;
+         x++, iz += depthStep, attribute = attribute + attributeStep) {
       int index = y * W + x;
       if (iz <= zbuffer[index])
         continue;
       zbuffer[index] = iz;
       double distance = 1 / iz, value = 1, glow = 0;
       if (world && material) {
-        Vec wp = ((*world)[0] * (u * p.iz) + (*world)[1] * (v * q.iz) +
-                  (*world)[2] * (w * r.iz)) *
-                 distance;
-        value = materialValue(wp, normal, material);
+        Vec wp = attribute * distance;
+        value = materialValue(wp, normal, material, textureLevel);
         if (game.muzzle > 0) {
-          Vec delta = wp - game.eye();
+          Vec delta = wp - viewOrigin;
           double d2 = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
           glow = std::max(0., 1 - d2 / 12) * .3;
         }
       }
       unsigned surfaceColor = color;
       if (uv && image) {
-        Vec st = ((*uv)[0] * (u * p.iz) + (*uv)[1] * (v * q.iz) +
-                  (*uv)[2] * (w * r.iz)) *
-                 distance;
+        Vec st = attribute * distance;
         surfaceColor = image->sample(st.x, st.y);
         value = .72 + .28 * std::max(0., normal.x * .48 - normal.y * .38 +
                                              normal.z * .8);
       }
       double fog = std::min(.7, distance / 85), brightness = value * (1 - fog);
       pixels[index] = rgb(int(((surfaceColor >> 16) & 255) * brightness +
-                              130 * fog + 150 * glow),
+                              130 * fog + 150 * glow + specular),
                           int(((surfaceColor >> 8) & 255) * brightness +
                               (arena.id == 1   ? 162
                                : arena.id == 2 ? 113
@@ -291,7 +345,7 @@ void triangle(Vec a, Vec b, Vec c, unsigned color, const Camera &camera) {
     std::array<Vec, 3> world = {clipped[0].world, clipped[i].world,
                                 clipped[i + 1].world};
     raster(clipped[0].p, clipped[i].p, clipped[i + 1].p, color, &world, n,
-           activeMaterial);
+           activeMaterial, nullptr, nullptr, camera.origin);
   }
 }
 void quad(Vec a, Vec b, Vec c, Vec d, unsigned color, const Camera &camera) {
@@ -312,8 +366,9 @@ void cube(Box box, const Camera &camera) {
        shade(box.color, 1.15), camera);
 }
 void beam(Vec a, Vec b, double radius, unsigned color, const Camera &camera) {
-  Vec right = {-sin(game.a) * radius, cos(game.a) * radius, 0},
-      up = {0, 0, radius};
+  Vec right = {-camera.sa * radius, camera.ca * radius, 0},
+      up = {-camera.ca * camera.sp * radius, -camera.sa * camera.sp * radius,
+            camera.cp * radius};
   quad(a - right, b - right, b + right, a + right, color, camera);
   quad(a - up, b - up, b + up, a + up, color, camera);
 }
@@ -323,13 +378,14 @@ void drawWorld() {
   Camera camera;
   if (shadowField.revision != arena.revision)
     shadowField.rebuild();
-  std::fill(zbuffer.begin(), zbuffer.end(), 0);
-  for (int y = 0; y < H; y++)
-    for (int x = 0; x < W; x++)
-      pixels[y * W + x] =
-          arena.id == 1   ? rgb(95 + y / 8, 133 + y / 13, 157 + y / 19)
-          : arena.id == 2 ? rgb(48 + y / 10, 72 + y / 11, 96 + y / 13)
-                          : rgb(72 + y / 9, 116 + y / 13, 145 + y / 19);
+  for (int y = renderRegion.y; y < renderRegion.y + renderRegion.h; y++) {
+    unsigned sky = arena.id == 1 ? rgb(95 + y / 8, 133 + y / 13, 157 + y / 19)
+                   : arena.id == 2
+                       ? rgb(48 + y / 10, 72 + y / 11, 96 + y / 13)
+                       : rgb(72 + y / 9, 116 + y / 13, 145 + y / 19);
+    std::fill_n(zbuffer.begin() + y * W + renderRegion.x, renderRegion.w, 0);
+    std::fill_n(pixels.begin() + y * W + renderRegion.x, renderRegion.w, sky);
+  }
   Vec sun = camera.transform(camera.origin + Vec{.48, -.38, .8} * 50);
   if (sun.z > .1) {
     auto p = screen(sun);
@@ -500,11 +556,13 @@ void softenEdges() {
   auto luminance = [](uint32_t p) {
     return int(((p >> 16) & 255) * 3 + ((p >> 8) & 255) * 6 + (p & 255)) / 10;
   };
+  static std::vector<uint16_t> luma(W * H);
+  for (int i = 0; i < W * H; i++)
+    luma[i] = uint16_t(luminance(source[i]));
   for (int y = 1; y < H - 1; y++)
     for (int x = 1; x < W - 1; x++) {
-      int i = y * W + x, n = luminance(source[i - W]),
-          s = luminance(source[i + W]), w = luminance(source[i - 1]),
-          e = luminance(source[i + 1]);
+      int i = y * W + x, n = luma[i - W], s = luma[i + W], w = luma[i - 1],
+          e = luma[i + 1];
       if (std::max({n, s, w, e}) - std::min({n, s, w, e}) < 70)
         continue;
       bool vertical = std::abs(n - s) > std::abs(e - w);
@@ -518,17 +576,43 @@ void softenEdges() {
     }
 }
 #include "viewmodel.hpp"
+void drawAimIndicators() {
+  unsigned cross = game.hit > 0 ? 0xF0AE65 : 0xD8E2DA;
+  if (!scopedGun(game.weapon) && !game.utilityEquipped && game.hp > 0) {
+    int gap = 5 + int(game.recoil * 5 + game.moveBlend * 4);
+    line(W / 2 - gap - 5, H / 2, W / 2 - gap, H / 2, cross);
+    line(W / 2 + gap, H / 2, W / 2 + gap + 5, H / 2, cross);
+    line(W / 2, H / 2 - gap - 5, W / 2, H / 2 - gap, cross);
+    line(W / 2, H / 2 + gap, W / 2, H / 2 + gap + 5, cross);
+  }
+  if (game.hit > 0 && !scopedGun(game.weapon)) {
+    line(W / 2 - 8, H / 2 - 8, W / 2 - 3, H / 2 - 3, cross);
+    line(W / 2 + 8, H / 2 + 8, W / 2 + 3, H / 2 + 3, cross);
+  }
+}
 void render() {
   drawWorld();
   drawDroppedWeapons();
   drawViewmodel();
   drawScopeLens();
+  static const std::vector<uint16_t> vignette = [] {
+    std::vector<uint16_t> result(W * H);
+    for (int y = 0; y < H; y++)
+      for (int x = 0; x < W; x++) {
+        double dx = (x - W * .5) / (W * .5), dy = (y - H * .5) / (H * .5);
+        result[y * W + x] =
+            uint16_t(256 * (1 - .18 * std::min(1., dx * dx + dy * dy)));
+      }
+    return result;
+  }();
   for (int y = 0; y < H; y++)
     for (int x = 0; x < W; x++) {
-      double dx = (x - W * .5) / (W * .5), dy = (y - H * .5) / (H * .5);
       auto &c = pixels[y * W + x];
-      c = shade(c, 1 - .18 * std::min(1., dx * dx + dy * dy));
-      if (game.hurt > 0 && (std::abs(dx) > .9 || std::abs(dy) > .87))
+      unsigned v = vignette[y * W + x];
+      c = ((((c >> 16) & 255) * v >> 8) << 16) |
+          ((((c >> 8) & 255) * v >> 8) << 8) | ((c & 255) * v >> 8);
+      if (game.hurt > 0 &&
+          (x < W / 20 || x > W * 19 / 20 || y < H * .065 || y > H * .935))
         c = 0x8D302B;
       if (game.flash > 0) {
         double alpha = std::min(.98, game.flash / 2);
@@ -538,16 +622,7 @@ void render() {
       }
     }
   softenEdges();
-  unsigned cross = game.hit > 0 ? 0xF0AE65 : 0xD8E2DA;
-  int gap = 5 + int(game.recoil * 5) + (moving ? 4 : 0);
-  line(W / 2 - gap - 5, H / 2, W / 2 - gap, H / 2, cross);
-  line(W / 2 + gap, H / 2, W / 2 + gap + 5, H / 2, cross);
-  line(W / 2, H / 2 - gap - 5, W / 2, H / 2 - gap, cross);
-  line(W / 2, H / 2 + gap, W / 2, H / 2 + gap + 5, cross);
-  if (game.hit > 0) {
-    line(W / 2 - 8, H / 2 - 8, W / 2 - 3, H / 2 - 3, cross);
-    line(W / 2 + 8, H / 2 + 8, W / 2 + 3, H / 2 + 3, cross);
-  }
+  drawAimIndicators();
   rect(16, 16, 136, 136, 0x111B21);
   for (int y = 0; y < 128; y++)
     for (int x = 0; x < 128; x++) {

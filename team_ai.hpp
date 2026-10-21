@@ -235,6 +235,11 @@ void Game::tickBots(double dt) {
     }
     b.locomotion = dist(oldX, oldY, b.x, b.y) / std::max(.001, dt);
     b.walkPhase += b.locomotion * dt * 7;
+    b.poseFacing = wrap(b.poseFacing + wrap(b.facing - b.poseFacing) *
+                                           (1 - std::exp(-14 * dt)));
+    b.poseSpeed += (b.locomotion - b.poseSpeed) * (1 - std::exp(-12 * dt));
+    b.objectivePose +=
+        ((b.plant > 0 ? 1. : 0.) - b.objectivePose) * (1 - std::exp(-8 * dt));
     if (b.blind > 0) {
       b.plant = 0;
       b.state = "BLINDED";

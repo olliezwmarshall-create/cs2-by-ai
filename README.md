@@ -81,9 +81,13 @@ Carry **one primary and one secondary**. Buying or picking up another gun in the
 | Light sniper | Primary | $2000 | 10 | 80 | Faster light bolt-action |
 | Scout DMR | Primary | $2800 | 10 | 72 | Scoped semi-auto |
 
-Body figures precede armor reduction. Headshots deal triple base damage; high-penetration guns retain more damage against armor. Movement, jumping and recoil reduce accuracy; aiming and crouching improve it. Fire cadence runs on a fixed gameplay step. Reloads consume finite reserves. Bolt and pump cycles visibly move and temporarily lock conflicting actions.
+Body figures precede armor reduction. Headshots deal triple base damage; high-penetration guns retain more damage against armor. Movement and jumping reduce accuracy; aiming and crouching improve it. Fire cadence runs on a fixed gameplay step. Short clicks are queued so pressing and releasing between rendered frames still fires. The Windows loop requests a one-millisecond timer period while running so its short yield does not routinely stretch to a coarse system timer tick. Reloads consume finite reserves. Bolt and pump cycles visibly move and temporarily lock conflicting actions.
 
-Models differ by class: pistol slides, bullpup magazine placement, suppressor, shotgun tube/pump, machine-gun drum and belt, scopes and bolt handles. Magazine changes, equip transitions, recoil, breathing and sprint lowering are animated.
+**Recoil follows a repeatable spray path**, with weapon-dependent strength, an initial upward climb and a horizontal weave during sustained automatic fire. The camera and bullet direction share the same aim kick: pull down and counter-steer to compensate. There is still a small random accuracy spread. Recoil eases back and the spray sequence resets after a firing pause; reloading or switching also resets the sequence. The first shot follows your current aim before applying its kick.
+
+Scoped weapons have **no normal screen crosshair**, including while unscoped. Their reticle appears only inside the magnified scope lens.
+
+Models differ by class: pistol slides, bullpup magazine placement, suppressor, shotgun tube/pump, machine-gun drum and belt, scopes and bolt handles. Reloads use eased reach, magazine extraction/insertion and return stages, with the support hand following the magazine. Spring-based weapon kick, breathing, distance-driven gait and eased sprint/equip transitions animate independently of abrupt input changes. Movement accelerates and brakes as a vector; crouching and aiming ease between poses.
 
 ## Economy, drops and utility
 
@@ -108,13 +112,13 @@ Both teams use faster reactions and perception, higher accuracy, armor, weapon-d
 
 Bots navigate around buildings, flank, strafe, seek cover while hurt or reloading, and use smoke/flash on entry. A T planter has escorts; CT assigns the nearest surviving defuser, with others covering. Bot loadouts are pre-equipped rather than paid from a simulated bot economy.
 
-Characters use articulated tapered limbs, knees/elbows, boots, armor, pouches, helmets and goggles, rather than a single colored box. Walking stride follows actual movement. Reload hand motion, crouched objective poses, firing flashes and falling death poses are animated. This is procedural animation rather than a motion-captured character rig.
+Characters use articulated tapered limbs, knees/elbows, boots, armor, pouches, helmets and goggles, rather than a single colored box. Walking stride follows actual movement, with foot lift, torso motion and eased turn/stance poses. Reload hand motion, crouched objective poses, firing flashes and falling death poses are animated. This is procedural animation rather than a motion-captured character rig.
 
 ## See-through scopes and scene art
 
 Scopes have hollow 3D housings and a **picture-in-picture magnified lens**. Looking through one keeps the surrounding scene at normal magnification, with a reticle inside the lens. The former opaque full-screen scope mask is gone.
 
-Scenery includes continuous pitched roofs and gables, arches, drainpipes, roof vents, cranes, radar dishes, rounded tanks and domes, plus barrels, cargo and sloped barriers. Characters have rounded heads and helmets; weapon receivers, stocks and grips have bevelled edges. Surface materials include perspective-correct brick, stucco, paving, asphalt, wood, metal and woven cloth. Theme-specific sky and fog, cast shadows, contact shading, metal highlights and edge smoothing support the new shapes. Detail levels and visibility culling limit distant geometry cost.
+Scenery includes continuous pitched roofs and gables, arches, drainpipes, roof vents, cranes, radar dishes, rounded tanks and domes, plus barrels, cargo and sloped barriers. Characters have rounded heads and helmets; weapon receivers, stocks and grips have bevelled edges. Surface materials include perspective-correct brick, stucco, paving, asphalt, wood, metal and woven cloth. Theme-specific sky and fog, cast shadows, contact shading, metal highlights and edge smoothing support the new shapes. Mipmapped, bilinearly filtered surface materials reduce distant texture shimmer; imported model textures are also filtered. Camera-relative billboards keep thin parts stable while turning. Weapon lighting uses its actual rendering camera. Scanline triangle coverage and incremental perspective interpolation reduce raster work while keeping full-resolution silhouettes. Scope passes clear only their lens render region. Detail levels and visibility culling limit distant geometry cost.
 
 The game includes **UV-mapped textured Lantern, WaterBottle and CesiumMilkTruck models downloaded from KhronosGroup/glTF-Sample-Assets**. Lantern and WaterBottle are CC0-1.0; CesiumMilkTruck is copyright 2017 Cesium and licensed CC-BY-4.0. Its license, attribution and trademark notice are included with the assets. Original authors, pinned source URLs, hashes, license links and conversion details are in [assets/CREDITS.md](assets/CREDITS.md) and [assets/sources.json](assets/sources.json). These props are converted and bundled locally. The software renderer uses their base-color images, not the full PBR material stack. The overall art remains stylized rather than photorealistic.
 
@@ -134,7 +138,7 @@ g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer main.
 /tmp/breach-sanitized
 ```
 
-Checks cover all three map layouts, voting revisions/ties/timeouts, map activation, circular cover, all 16 purchases, primary/secondary replacement, six-round halves, first-to-seven match completion and restart, paid utility carryover/consumption, burst/pellet/automatic fire, armor, drops and ammo-preserving pickups, bomb/timer rules, harder AI, full autonomous rounds, map connectivity and spawn separation, menu hit areas, movement, actual downloaded UV/image data, every viewmodel and reload pose, transparent scope composition, clipping and depth.
+Checks cover all three map layouts, voting revisions/ties/timeouts, map activation, circular cover, all 16 purchases, primary/secondary replacement, six-round halves, first-to-seven match completion and restart, paid utility carryover/consumption, burst/pellet/automatic fire, armor, drops and ammo-preserving pickups, bomb/timer rules, harder AI, full autonomous rounds, map connectivity and spawn separation, menu hit areas, movement, actual downloaded UV/image data, every viewmodel and reload pose, transparent scope composition, sniper crosshair suppression, recoil compensation/recovery, movement at different update rates, spring integration, camera-relative billboards, filtered texture sampling, scanline coverage, clipping and depth.
 
 `tools/convert_gltf.py` reproduces the BRM asset conversion from the pinned GLB sources using Python, NumPy and Pillow; it is not needed to play or compile the game.
 

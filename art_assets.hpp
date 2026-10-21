@@ -7,9 +7,23 @@ struct TextureImage {
   uint32_t sample(double u, double v) const {
     if (!w || !h)
       return 0xAAAAAA;
-    int x = std::clamp(int((u - floor(u)) * w), 0, int(w) - 1),
-        y = std::clamp(int((v - floor(v)) * h), 0, int(h) - 1);
-    return pixels[y * w + x];
+    double x = (u - std::floor(u)) * w - .5, y = (v - std::floor(v)) * h - .5;
+    int ix = int(std::floor(x)), iy = int(std::floor(y));
+    double fx = x - ix, fy = y - iy;
+    auto read = [&](int xx, int yy) {
+      xx = xx < 0 ? xx + int(w) : xx >= int(w) ? xx - int(w) : xx;
+      yy = yy < 0 ? yy + int(h) : yy >= int(h) ? yy - int(h) : yy;
+      return pixels[yy * w + xx];
+    };
+    uint32_t a = read(ix, iy), b = read(ix + 1, iy), c = read(ix, iy + 1),
+             d = read(ix + 1, iy + 1), out = 0;
+    for (int shift : {0, 8, 16}) {
+      double top = ((a >> shift) & 255) * (1 - fx) + ((b >> shift) & 255) * fx,
+             bottom =
+                 ((c >> shift) & 255) * (1 - fx) + ((d >> shift) & 255) * fx;
+      out |= uint32_t(top * (1 - fy) + bottom * fy) << shift;
+    }
+    return out;
   }
 };
 struct ArtVertex {
