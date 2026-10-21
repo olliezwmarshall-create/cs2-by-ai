@@ -41,13 +41,29 @@ struct WeaponModel {
     quad(point(a), point(b), point(c), point(d), color, camera);
   }
   void box(Box b) {
-    double x = b.x, y = b.y, z = b.z, X = x + b.w, Y = y + b.d, Z = z + b.h;
-    face({x, y, z}, {X, y, z}, {X, y, Z}, {x, y, Z}, shade(b.color, .72));
-    face({X, Y, z}, {x, Y, z}, {x, Y, Z}, {X, Y, Z}, shade(b.color, .9));
-    face({x, Y, z}, {x, y, z}, {x, y, Z}, {x, Y, Z}, shade(b.color, .65));
-    face({X, y, z}, {X, Y, z}, {X, Y, Z}, {X, y, Z}, b.color);
-    face({x, y, Z}, {X, y, Z}, {X, Y, Z}, {x, Y, Z}, shade(b.color, 1.2));
-    face({x, y, z}, {x, Y, z}, {X, Y, z}, {X, y, z}, shade(b.color, .55));
+    // Chamfered extrusions give receivers, stocks, grips and hands physical
+    // edge bevels instead of six square faces.
+    double y = b.y, z = b.z, Y = y + b.d, Z = z + b.h,
+           r = std::min({b.d * .18, b.h * .18, .025});
+    std::array<Vec, 8> ring = {{{0, y + r, z},
+                                {0, Y - r, z},
+                                {0, Y, z + r},
+                                {0, Y, Z - r},
+                                {0, Y - r, Z},
+                                {0, y + r, Z},
+                                {0, y, Z - r},
+                                {0, y, z + r}}};
+    for (int i = 0; i < 8; i++) {
+      Vec p = ring[i], q = ring[(i + 1) % 8];
+      p.x = q.x = b.x;
+      Vec P = p, Q = q;
+      P.x = Q.x = b.x + b.w;
+      face(p, q, Q, P, shade(b.color, i % 2 ? 1.08 : .87));
+      triangle(point({b.x, (y + Y) * .5, (z + Z) * .5}), point(q), point(p),
+               shade(b.color, .7), camera);
+      triangle(point({b.x + b.w, (y + Y) * .5, (z + Z) * .5}), point(P),
+               point(Q), b.color, camera);
+    }
   }
   void cylinder(double start, double end, double y, double z, double radius,
                 unsigned color) {
@@ -190,10 +206,14 @@ void drawViewmodel() {
   int previous = activeMaterial;
   activeMaterial = 4;
   WeaponModel m;
-  m.box({0, -.16, -.3, .35, .14, .14, 0x36443A});
-  m.box({.1, .04, -.34, .35, .15, .15, 0x36443A});
-  m.box({.35, -.13, -.22, .12, .11, .12, 0xAE8E70});
-  m.box({.34, .035, -.22, .13, .12, .12, 0xAE8E70});
+  segment(m.point({0, -.16, -.30}), m.point({.36, -.12, -.22}), .085, .065,
+          0x36443A, m.camera);
+  segment(m.point({.1, .13, -.34}), m.point({.43, .06, -.22}), .09, .065,
+          0x36443A, m.camera);
+  segment(m.point({.34, -.12, -.22}), m.point({.46, -.08, -.18}), .07, .065,
+          0xAE8E70, m.camera);
+  segment(m.point({.39, .06, -.22}), m.point({.48, .035, -.18}), .07, .065,
+          0xAE8E70, m.camera);
   if (game.utilityEquipped) {
     m.cylinder(.3, .47, 0, -.03, .09,
                game.utility == 0   ? 0x678044

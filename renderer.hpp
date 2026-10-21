@@ -69,26 +69,22 @@ Screen screen(Vec p) {
 struct ShadowField {
   static constexpr int S = MAP * 4;
   std::array<double, S * S> light{}, ao{};
-  ShadowField() {
-    for (int y = 0; y < S; y++)
-      for (int x = 0; x < S; x++) {
+  int revision = -1;
+  ShadowField() { rebuild(); }
+  void rebuild() {
+    light.fill(1);
+    ao.fill(1);
+    revision = arena.revision;
+    for (int y = 0; y < arena.size * 4; y++)
+      for (int x = 0; x < arena.size * 4; x++) {
         Vec p = {(x + .5) / 4., (y + .5) / 4., .04};
         double lit = 1;
         for (int n = 1; n < 35; n++) {
           Vec q = p + Vec{.48, -.38, .8} * (n * .25);
-          if (arena.wall(q.x, q.y)) {
-            if (q.x >= 0 && q.y >= 0 && q.x < MAP && q.y < MAP &&
-                q.z < arena.wallHeight(int(q.x), int(q.y))) {
-              lit = .55;
-              break;
-            }
+          if (q.z < arena.heightAt(q.x, q.y)) {
+            lit = .58;
+            break;
           }
-          for (auto b : arena.props)
-            if (q.x > b.x && q.x < b.x + b.w && q.y > b.y && q.y < b.y + b.d &&
-                q.z < b.h) {
-              lit = .55;
-              break;
-            }
           if (lit < 1)
             break;
         }
@@ -107,16 +103,16 @@ struct ShadowField {
     return ui.prefs.shadows ? light[yy * S + xx] : ao[yy * S + xx];
   }
 };
-const ShadowField shadowField;
+ShadowField shadowField;
 struct TextureTiles {
   static constexpr int N = 128;
-  std::array<std::array<double, N * N>, 6> tiles{};
+  std::array<std::array<double, N * N>, 8> tiles{};
   TextureTiles() {
-    for (int m = 0; m < 6; m++)
+    for (int m = 0; m < 8; m++)
       for (int y = 0; y < N; y++)
         for (int x = 0; x < N; x++) {
           unsigned seed = unsigned(x) * 73856093u ^ unsigned(y) * 19349663u;
-          double value = .94 + (seed & 255) / 2550.;
+          double value = .98 + (seed & 255) / 12750.;
           double u = double(x) / N, v = double(y) / N;
           auto fract = [](double p) { return p - floor(p); };
           if (m == 1) {
@@ -127,7 +123,7 @@ struct TextureTiles {
           }
           if (m == 2) {
             if (std::min(fract(u * 2), fract(v * 2)) < .025)
-              value *= .52;
+              value *= .82;
             value *= .96 + .08 * fract(floor(u * 2) * .37 + floor(v * 2) * .61);
           }
           if (m == 3) {
@@ -142,6 +138,10 @@ struct TextureTiles {
           }
           if (m == 5)
             value *= ((x + y) % 4 == 0 ? .8 : 1.);
+          if (m == 6)
+            value *= .94 + .06 * fract(v * 7 + fract(u * 3) * .12);
+          if (m == 7)
+            value *= .96 + .04 * fract(u * 11 + v * 7);
           tiles[m][y * N + x] = value;
         }
   }
@@ -155,7 +155,8 @@ struct TextureTiles {
 };
 const TextureTiles textures;
 double materialValue(Vec p, Vec normal, int material) {
-  double value = textures.sample(p, normal, material);
+  double value = textures.sample(
+      p, normal, material == 2 ? (arena.id == 0 ? 7 : 2) : material);
   if (material == 2)
     value *= shadowField.sample(p.x, p.y);
   if (material == 1 && p.z < .2)
@@ -181,15 +182,35 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
                           ceil(std::max({p.y, q.y, r.y}))));
   if (minx > maxx || miny > maxy)
     return;
-  for (int y = miny; y <= maxy; y++)
-    for (int x = minx; x <= maxx; x++) {
-      double u = ((q.x - x - .5) * (r.y - y - .5) -
-                  (q.y - y - .5) * (r.x - x - .5)) /
-                 area,
-             v = ((r.x - x - .5) * (p.y - y - .5) -
-                  (r.y - y - .5) * (p.x - x - .5)) /
-                 area,
-             w = 1 - u - v;
+  double specular = 0;
+  if (world && (material == 4 || image)) {
+    Vec center = ((*world)[0] + (*world)[1] + (*world)[2]) * (1. / 3),
+        eye = game.eye() - center;
+    double l = length(eye);
+    if (l > .001) {
+      Vec half = eye * (1 / l) + Vec{.48, -.38, .8};
+      double h = length(half);
+      if (h > .001)
+        specular = pow(std::max(0., (normal.x * half.x + normal.y * half.y +
+                                     normal.z * half.z) /
+                                        h),
+                       24) *
+                   32;
+    }
+  }
+  double inverseArea = 1 / area;
+  double u0 = ((q.x - minx - .5) * (r.y - miny - .5) -
+               (q.y - miny - .5) * (r.x - minx - .5)) *
+              inverseArea;
+  double v0 = ((r.x - minx - .5) * (p.y - miny - .5) -
+               (r.y - miny - .5) * (p.x - minx - .5)) *
+              inverseArea;
+  double ux = (q.y - r.y) * inverseArea, uy = (r.x - q.x) * inverseArea;
+  double vx = (r.y - p.y) * inverseArea, vy = (p.x - r.x) * inverseArea;
+  for (int y = miny; y <= maxy; y++) {
+    double u = u0 + (y - miny) * uy, v = v0 + (y - miny) * vy;
+    for (int x = minx; x <= maxx; x++, u += ux, v += vx) {
+      double w = 1 - u - v;
       if (u < -.00001 || v < -.00001 || w < -.00001)
         continue;
       double iz = u * p.iz + v * q.iz + w * r.iz;
@@ -219,12 +240,22 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
                                              normal.z * .8);
       }
       double fog = std::min(.7, distance / 85), brightness = value * (1 - fog);
-      pixels[index] = rgb(
-          int(((surfaceColor >> 16) & 255) * brightness + 130 * fog +
-              150 * glow),
-          int(((surfaceColor >> 8) & 255) * brightness + 150 * fog + 90 * glow),
-          int((surfaceColor & 255) * brightness + 157 * fog + 35 * glow));
+      pixels[index] = rgb(int(((surfaceColor >> 16) & 255) * brightness +
+                              130 * fog + 150 * glow),
+                          int(((surfaceColor >> 8) & 255) * brightness +
+                              (arena.id == 1   ? 162
+                               : arena.id == 2 ? 113
+                                               : 150) *
+                                  fog +
+                              90 * glow + specular),
+                          int((surfaceColor & 255) * brightness +
+                              (arena.id == 1   ? 143
+                               : arena.id == 2 ? 129
+                                               : 157) *
+                                  fog +
+                              35 * glow + specular));
     }
+  }
 }
 void triangle(Vec a, Vec b, Vec c, unsigned color, const Camera &camera) {
   struct Vertex {
@@ -286,20 +317,27 @@ void beam(Vec a, Vec b, double radius, unsigned color, const Camera &camera) {
   quad(a - right, b - right, b + right, a + right, color, camera);
   quad(a - up, b - up, b + up, a + up, color, camera);
 }
+#include "architecture.hpp"
 #include "model_render.hpp"
 void drawWorld() {
   Camera camera;
+  if (shadowField.revision != arena.revision)
+    shadowField.rebuild();
   std::fill(zbuffer.begin(), zbuffer.end(), 0);
   for (int y = 0; y < H; y++)
     for (int x = 0; x < W; x++)
-      pixels[y * W + x] = rgb(68 + y / 8, 116 + y / 12, 151 + y / 20);
+      pixels[y * W + x] =
+          arena.id == 1   ? rgb(95 + y / 8, 133 + y / 13, 157 + y / 19)
+          : arena.id == 2 ? rgb(48 + y / 10, 72 + y / 11, 96 + y / 13)
+                          : rgb(72 + y / 9, 116 + y / 13, 145 + y / 19);
   Vec sun = camera.transform(camera.origin + Vec{.48, -.38, .8} * 50);
   if (sun.z > .1) {
     auto p = screen(sun);
     ellipse(int(p.x), int(p.y), 32, 32, 0xFFF1CA);
   }
-  for (int y = 0; y < MAP; y++)
-    for (int x = 0; x < MAP; x++) {
+  drawLandscape(camera);
+  for (int y = 0; y < arena.size; y++)
+    for (int x = 0; x < arena.size; x++) {
       if (dist(camera.origin.x, camera.origin.y, x + .5, y + .5) > 75)
         continue;
       Vec center = camera.transform({x + .5, y + .5, 1.6});
@@ -308,16 +346,20 @@ void drawWorld() {
         continue;
       double xx = x, yy = y;
       activeMaterial = 2;
-      unsigned ground = (x + y) % 2 ? 0xA2A195 : 0x999C91;
+      unsigned ground = arena.id == 1   ? 0xC1B28F
+                        : arena.id == 2 ? 0x7F8E8C
+                                        : 0x7E8E88;
       if (game.site(x + .5, y + .5))
         ground = 0xAA8D57;
       if (arena.cells[y][x] != '#')
         quad({xx, yy, 0}, {xx + 1, yy, 0}, {xx + 1, yy + 1, 0}, {xx, yy + 1, 0},
              ground, camera);
       if (arena.cells[y][x] == '#') {
-        activeMaterial = 1;
+        activeMaterial = arena.id == 1 ? 6 : arena.id == 2 ? 7 : 1;
         double height = arena.wallHeight(x, y);
-        unsigned color = x > 18 ? 0xB3C1C0 : 0xC8B798;
+        unsigned color = arena.id == 1   ? 0xCDB795
+                         : arena.id == 2 ? 0x93A6AC
+                                         : 0xB4C1BD;
         auto exposed = [&](int nx, int ny) {
           return nx < 0 || ny < 0 || nx >= MAP || ny >= MAP ||
                  arena.cells[ny][nx] != '#' ||
@@ -348,18 +390,14 @@ void drawWorld() {
           cube({xx + .17, yy - .055, 1.46, .66, .025, .82, 0x72999D}, camera);
           activeMaterial = 1;
         }
-        if (x % 3 == 0 && y % 3 == 0)
-          cube({xx - .04, yy - .04, 2.8, 1.08, 1.08, .18, 0x5E696C}, camera);
       }
     }
+  drawArchitecture(camera);
   for (size_t index = 0; index < arena.props.size(); index++)
     drawProp(arena.props[index], int(index), camera);
+  for (auto c : arena.rounds)
+    drawRoundSolid(c, camera);
   activeMaterial = 4;
-  // Physical overhead pipe bridges and support posts, well above the player.
-  for (int xx : {12, 27, 42, 55}) {
-    cube({double(xx), 26, 5.5, .25, 12, .25, 0x637375, false}, camera);
-    cube({double(xx), 26, 0, .18, .18, 5.5, 0x637375, false}, camera);
-  }
   for (auto site : std::array<Vec, 2>{{SITE_A, SITE_B}}) {
     for (int i = 0; i < 4; i++) {
       double x = site.x - 2 + i;
@@ -372,16 +410,15 @@ void drawWorld() {
     cube({site.x + 1.78, site.y - 1.04, 1.6, .65, .2, .65, 0xA54832, false},
          camera);
   }
-  for (auto pos : std::array<Vec, 4>{
-           {{12.4, 26, 0}, {23, 38, 0}, {43, 18, 0}, {50, 48, 0}}})
-    if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 22)
+  for (auto pos : arena.lamps)
+    if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 24)
       drawArt(lanternArt, pos, 3.7, 0, camera);
-  for (auto pos : std::array<Vec, 4>{{{24.3, 17.5, 1.4},
-                                      {24.3, 46.5, 1.4},
-                                      {55.4, 8.4, 1.1},
-                                      {56.5, 55.4, 1.1}}})
+  for (auto pos : arena.bottles)
     if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 12)
       drawArt(bottleArt, pos, .55, 0, camera);
+  for (auto pos : arena.trucks)
+    if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 32)
+      drawArt(truckArt, pos, 2.4, 0, camera);
   activeMaterial = 0;
   // Soft contact shadows anchor moving characters to the paving.
   for (auto &b : game.bots)
@@ -457,6 +494,29 @@ void drawWorld() {
       }
   }
 }
+void softenEdges() {
+  static std::vector<uint32_t> source;
+  source = pixels;
+  auto luminance = [](uint32_t p) {
+    return int(((p >> 16) & 255) * 3 + ((p >> 8) & 255) * 6 + (p & 255)) / 10;
+  };
+  for (int y = 1; y < H - 1; y++)
+    for (int x = 1; x < W - 1; x++) {
+      int i = y * W + x, n = luminance(source[i - W]),
+          s = luminance(source[i + W]), w = luminance(source[i - 1]),
+          e = luminance(source[i + 1]);
+      if (std::max({n, s, w, e}) - std::min({n, s, w, e}) < 70)
+        continue;
+      bool vertical = std::abs(n - s) > std::abs(e - w);
+      uint32_t a = source[i - (vertical ? W : 1)],
+               b = source[i + (vertical ? W : 1)], c = source[i];
+      pixels[i] = rgb(int(((c >> 16) & 255) * .72 +
+                          (((a >> 16) & 255) + ((b >> 16) & 255)) * .14),
+                      int(((c >> 8) & 255) * .72 +
+                          (((a >> 8) & 255) + ((b >> 8) & 255)) * .14),
+                      int((c & 255) * .72 + ((a & 255) + (b & 255)) * .14));
+    }
+}
 #include "viewmodel.hpp"
 void render() {
   drawWorld();
@@ -477,6 +537,7 @@ void render() {
                 int((c & 255) * (1 - alpha) + 230 * alpha));
       }
     }
+  softenEdges();
   unsigned cross = game.hit > 0 ? 0xF0AE65 : 0xD8E2DA;
   int gap = 5 + int(game.recoil * 5) + (moving ? 4 : 0);
   line(W / 2 - gap - 5, H / 2, W / 2 - gap, H / 2, cross);
@@ -488,24 +549,25 @@ void render() {
     line(W / 2 + 8, H / 2 + 8, W / 2 + 3, H / 2 + 3, cross);
   }
   rect(16, 16, 136, 136, 0x111B21);
-  for (int y = 0; y < MAP; y++)
-    for (int x = 0; x < MAP; x++)
-      rect(20 + x * (128 / MAP), 20 + y * (128 / MAP), 128 / MAP - 1,
-           128 / MAP - 1,
-           arena.cells[y][x] == '#'    ? 0x64706C
-           : game.site(x + .5, y + .5) ? 0xB49B5D
-                                       : 0x202C30);
-  int mx = 20 + int(game.x * (128. / MAP)),
-      my = 20 + int(game.y * (128. / MAP));
+  for (int y = 0; y < 128; y++)
+    for (int x = 0; x < 128; x++) {
+      int xx = x * arena.size / 128, yy = y * arena.size / 128;
+      rect(20 + x, 20 + y, 1, 1,
+           arena.cells[yy][xx] == '#'    ? 0x64706C
+           : game.site(xx + .5, yy + .5) ? 0xB49B5D
+                                         : 0x202C30);
+    }
+  int mx = 20 + int(game.x * 128 / arena.size),
+      my = 20 + int(game.y * 128 / arena.size);
   rect(mx - 2, my - 2, 4, 4, 0x85D7C4);
   line(mx, my, mx + int(cos(game.a) * 8), my + int(sin(game.a) * 8), 0x85D7C4);
   for (auto &b : game.bots)
     if (b.hp > 0 && b.terrorist == game.attacker)
-      rect(20 + int(b.x * (128. / MAP)) - 1, 20 + int(b.y * (128. / MAP)) - 1,
-           3, 3, 0x75B1E2);
+      rect(20 + int(b.x * 128 / arena.size) - 1,
+           20 + int(b.y * 128 / arena.size) - 1, 3, 3, 0x75B1E2);
   if (game.planted)
-    rect(20 + int(game.bombX * (128. / MAP)) - 2,
-         20 + int(game.bombY * (128. / MAP)) - 2, 4, 4, 0xF35A41);
+    rect(20 + int(game.bombX * (128. / arena.size)) - 2,
+         20 + int(game.bombY * (128. / arena.size)) - 2, 4, 4, 0xF35A41);
   rect(18, H - 65, 250, 48, 0x19252B);
   rect(W - 280, H - 65, 262, 48, 0x19252B);
   rect(28, H - 25, 120, 3, 0x394447);

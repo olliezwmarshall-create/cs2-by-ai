@@ -75,8 +75,20 @@ void segment(Vec a, Vec b, double radiusA, double radiusB, unsigned color,
   Vec up = {axis.y * right.z - axis.z * right.y,
             axis.z * right.x - axis.x * right.z,
             axis.x * right.y - axis.y * right.x};
-  for (int i = 0; i < 10; i++) {
-    double t = 2 * PI * i / 10, u = 2 * PI * (i + 1) / 10;
+  double radius = std::max(radiusA, radiusB);
+  Vec q = camera.transform((a + b) * .5);
+  double bound = d * .5 + radius;
+  if (q.z < -bound ||
+      std::abs(q.x) > std::max(0., q.z) * W / (2 * focal()) + bound * 1.5)
+    return;
+  double projected = focal() * radius / std::max(.1, q.z);
+  if (projected < 1.2) {
+    beam(a, b, radius, color, camera);
+    return;
+  }
+  int sides = projected < 3 ? 6 : projected > 12 && radius > .3 ? 16 : 10;
+  for (int i = 0; i < sides; i++) {
+    double t = 2 * PI * i / sides, u = 2 * PI * (i + 1) / sides;
     Vec p = right * cos(t) + up * sin(t), q = right * cos(u) + up * sin(u);
     quad(a + p * radiusA, a + q * radiusA, b + q * radiusB, b + p * radiusB,
          color, camera);
@@ -84,6 +96,8 @@ void segment(Vec a, Vec b, double radiusA, double radiusB, unsigned color,
     triangle(b, b + p * radiusB, b + q * radiusB, color, camera);
   }
 }
+void dome(Vec center, double rx, double ry, double rz, bool hemisphere,
+          unsigned color, const Camera &camera);
 void drawCharacter(const Bot &b, int id, const Camera &camera) {
   double d = dist(camera.origin.x, camera.origin.y, b.x, b.y);
   if (d > 65)
@@ -131,10 +145,9 @@ void drawCharacter(const Bot &b, int id, const Camera &camera) {
     segment(hand, point({.46, side * .08, 1.26}), .07, .07, vest, camera);
   }
   activeMaterial = 1;
-  segment(point({0, 0, 1.42}), point({0, 0, 1.65}), .14, .15, skin, camera);
+  dome(point({0, 0, 1.56}), .145, .145, .18, false, skin, camera);
   activeMaterial = 4;
-  segment(point({-.015, 0, 1.60}), point({-.015, 0, 1.77}), .19, .13, 0x3B494A,
-          camera);
+  dome(point({-.015, 0, 1.63}), .20, .18, .15, true, 0x3B494A, camera);
   segment(point({.15, -.12, 1.59}), point({.15, .12, 1.59}), .045, .045,
           0x1D3038, camera);
   // Pouches, shoulder armor and a facing-oriented rifle avoid featureless

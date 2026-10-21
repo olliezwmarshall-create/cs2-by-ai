@@ -74,9 +74,10 @@ struct ArtMesh {
     return true;
   }
 };
-ArtMesh lanternArt, bottleArt;
+ArtMesh lanternArt, bottleArt, truckArt;
 bool loadArt(const std::string &directory) {
   bool a = lanternArt.load(directory + "/lantern.brm"),
        b = bottleArt.load(directory + "/bottle.brm");
-  return a && b;
+  bool c = truckArt.load(directory + "/truck.brm");
+  return a && b && c;
 }

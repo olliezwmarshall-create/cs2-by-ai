@@ -64,7 +64,9 @@ void drawInterface() {
   auto page = ui.page;
   if (page == ScreenPage::Play) {
     caption(180, 20, 16,
-            "HARBOR / " + std::string(game.attacker ? "T" : "CT"), 0x9FB6B8);
+            std::string(MAP_NAMES[arena.id]) + " / " +
+                std::string(game.attacker ? "T" : "CT"),
+            0x9FB6B8);
     rounded({W / 2 - 110, 15, 220, 46}, 0x17252B);
     caption(W / 2 - 92, 24, 22, std::to_string(game.alive(true)) + " T",
             0xEBC57B);
@@ -133,14 +135,27 @@ void drawInterface() {
     return;
   }
   blendRect({0, 0, W, H}, 0x081219, page == ScreenPage::Home ? .35 : .82);
+  if (page == ScreenPage::Vote) {
+    caption(55, 45, 36, "VOTE THE NEXT MAP");
+    caption(
+        55, 94, 16,
+        "Your ballot + 10 AI ballots. " +
+            std::to_string(int(std::ceil(std::max(0., 10 - ui.vote.elapsed)))) +
+            " seconds left.",
+        0xADBEBD);
+    caption(55, 565, 13,
+            "Ties favor your voted map, then the first map listed. Voting "
+            "starts a fresh match.",
+            0x9BB2B5);
+  }
   if (page == ScreenPage::Home) {
     for (int x = 0; x < 510; x += 5)
       blendRect({x, 0, 5, H}, 0x09151E, .85 * (1 - x / 540.));
     caption(70, 68, 14, "O R I G I N A L   T A C T I C A L   S H O O T E R",
             0xB7CBC8);
     caption(65, 105, 66, "BREACH", 0xF1EBDB);
-    caption(70, 181, 22, "HARBOR / FIRST TO SEVEN", 0xCDAE73);
-    caption(70, 218, 14, "Six-round halves. Larger routes. Harder opposition.",
+    caption(70, 181, 22, "THREE MAPS / FIRST TO SEVEN", 0xCDAE73);
+    caption(70, 218, 14, "Vote the battleground. Plan the next operation.",
             0xA6BABB);
     caption(70, 552, 13,
             "OFFLINE BOTS  /  ORIGINAL 3D ART  /  MOUSE-DRIVEN LOADOUT",
@@ -235,7 +250,8 @@ void drawInterface() {
     bool hover = b.r.contains(ui.mx, ui.my);
     unsigned color = !b.enabled ? 0x202C32 : hover ? 0x3B5059 : 0x223640;
     if ((page == ScreenPage::Buy && b.action == 20 + ui.buyTab) ||
-        (page == ScreenPage::Utility && b.action == 200 + game.utility))
+        (page == ScreenPage::Utility && b.action == 200 + game.utility) ||
+        (page == ScreenPage::Vote && b.action == 400 + ui.vote.human))
       color = 0x415858;
     rounded(b.r, color);
     rect(b.r.x, b.r.y + 8, 3, b.r.h - 16,
@@ -248,6 +264,38 @@ void drawInterface() {
     if (!b.detail.empty())
       caption(b.r.x + 18, b.r.y + (b.r.h > 70 ? b.r.h - 31 : 38), 13, b.detail,
               b.enabled ? 0xA4BBBD : 0x647B82);
+    if (page == ScreenPage::Vote && b.action >= 400 && b.action <= 402) {
+      static std::array<Arena, 3> previews;
+      static bool ready = false;
+      if (!ready) {
+        for (int i = 0; i < 3; i++)
+          previews[i].load(i);
+        ready = true;
+      }
+      int index = b.action - 400;
+      auto &map = previews[index];
+      for (int y = 0; y < 145; y++)
+        for (int x = 0; x < 232; x++) {
+          int xx = x * map.size / 232, yy = y * map.size / 145;
+          unsigned c = map.cells[yy][xx] == '#'
+                           ? (index == 1 ? 0xBA9C75 : 0x748E93)
+                       : index == 1 ? 0x5E5C48
+                       : index == 2 ? 0x263E48
+                                    : 0x294640;
+          rect(b.r.x + 18 + x, b.r.y + 60 + y, 1, 1, c);
+        }
+      for (Vec site : std::array<Vec, 2>{{map.siteA, map.siteB}})
+        ellipse(b.r.x + 18 + int(site.x * 232 / map.size),
+                b.r.y + 60 + int(site.y * 145 / map.size), 4, 4, 0xDFC078);
+      auto totals = ui.vote.totals();
+      caption(b.r.x + 18, b.r.y + 220, 22,
+              std::to_string(totals[index]) + " VOTES", 0xE5CB91);
+      caption(b.r.x + 18, b.r.y + 249, 13,
+              index == 0   ? "Warehouses / cranes / tanks"
+              : index == 1 ? "Tiled roofs / arcades / courtyards"
+                           : "Radomes / silos / mountain skyline",
+              0xAFC1C0);
+    }
     if (page == ScreenPage::Buy && b.action >= 100 &&
         b.action < 100 + WEAPON_COUNT) {
       weaponIcon(b.r.x + b.r.w - 172, b.r.y + 54, b.action - 100,

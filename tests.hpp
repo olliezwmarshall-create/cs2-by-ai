@@ -28,7 +28,7 @@ void imageFile(const std::string &path) {
   }
 }
 int main(int argc, char **argv) {
-  assert(MAP == 64 && WEAPON_COUNT == 16);
+  assert(MAP == 96 && WEAPON_COUNT == 16);
   Game g;
   int ts = 0, cts = 0;
   for (auto b : g.bots) {
@@ -123,8 +123,8 @@ int main(int argc, char **argv) {
   assert(g.bots[0].hp == 74 && g.bots[0].armor < 70);
   g = lane();
   g.x = 5;
-  g.y = 32;
-  g.bots = {target(12, 32)};
+  g.y = HOME_T.y;
+  g.bots = {target(12, HOME_T.y)};
   g.fire();
   assert(g.bots[0].hp == 100);
   for (int gun : {1, 2}) {
@@ -292,8 +292,8 @@ int main(int argc, char **argv) {
   assert(g.hp < 750 && bot.ammo < 5);
   g = lane();
   g.x = 5;
-  g.y = 32;
-  g.bots = {target(12, 32)};
+  g.y = HOME_T.y;
+  g.bots = {target(12, HOME_T.y)};
   g.bots[0].blind = 0;
   g.bots[0].facing = PI;
   g.tick(.02);
@@ -316,6 +316,88 @@ int main(int argc, char **argv) {
     for (auto b : g.bots)
       assert(!arena.solid(b.x, b.y, .19));
   }
+  // Map voting accepts one revisable human ballot, ten staggered AI votes,
+  // deterministic ties and timeout. Only the winning map becomes active.
+  MapVote ballot;
+  ballot.begin(3);
+  ballot.choose(1);
+  ballot.choose(2);
+  assert(ballot.totals()[1] == 0 && ballot.totals()[2] == 1);
+  ballot.update(2);
+  assert(!ballot.botsDone() && !ballot.expired());
+  ballot.update(4);
+  assert(ballot.botsDone());
+  int total = 0;
+  for (int n : ballot.totals())
+    total += n;
+  assert(total == 11);
+  ballot.ballots.fill(-1);
+  ballot.choose(2);
+  ballot.ballots[1] = 1;
+  assert(ballot.winner() == 2);
+  ballot.human = -1;
+  ballot.ballots[0] = -1;
+  ballot.ballots[2] = 2;
+  assert(ballot.winner() == 1);
+  Interface voting;
+  g = Game();
+  voting.beginVote(g, false);
+  voting.vote.choose(1);
+  voting.vote.ballots.fill(1);
+  voting.update(10.1, g);
+  assert(arena.id == 1 && arena.size == 88 && g.attacker == false &&
+         g.round == 1 && voting.page == ScreenPage::Buy);
+  selectMap(0);
+  // Every map has separate spawns, long reachable routes and real round cover.
+  std::array<size_t, 3> routes;
+  for (int map = 0; map < 3; map++) {
+    selectMap(map);
+    g = Game();
+    assert(arena.size == MAP_SIZES[map] && arena.size > 64);
+    assert(HOME_T.x == arena.homeT.x && SITE_B.y == arena.siteB.y);
+    assert(!arena.solid(g.x, g.y, .23));
+    for (auto b : g.bots) {
+      assert(!arena.solid(b.x, b.y, .23));
+      assert(!g.route(HOME_T.x, HOME_T.y, b.x, b.y).empty());
+      if (!b.terrorist)
+        assert(!g.visible(g.x, g.y, b.x, b.y));
+    }
+    routes[map] = g.route(HOME_T.x, HOME_T.y, SITE_A.x, SITE_A.y).size();
+    assert(routes[map] > 60);
+    assert(!g.route(HOME_T.x, HOME_T.y, SITE_B.x, SITE_B.y).empty());
+    for (auto c : arena.rounds)
+      assert(arena.solid(c.x, c.y));
+    // The larger layout must still support a complete autonomous round.
+    g.hp = 0;
+    for (int i = 0; i < 12000 && !g.ended; i++)
+      g.tick(1. / 60);
+    assert(g.ended);
+    int casualties = 0;
+    for (auto b : g.bots) {
+      assert(!arena.solid(b.x, b.y, .19));
+      casualties += b.hp <= 0;
+    }
+    assert(casualties > 0);
+  }
+  assert(routes[0] != routes[1] || routes[1] != routes[2]);
+  selectMap(0);
+  RoundSolid cylinder{3, 0, 1, 2, false, 0};
+  assert(std::abs(roundHit({0, 0, 1}, {1, 0, 0}, cylinder) - 2) < .001);
+  cylinder.dome = true;
+  assert(std::abs(roundHit({3, 0, 4}, {0, 0, -1}, cylinder) - 1) < .001);
+  // Rounds on a selected map retain six-round halves and first-to-seven scores.
+  for (int map = 0; map < 3; map++) {
+    selectMap(map);
+    g = Game();
+    for (int r = 0; r < 6; r++) {
+      g.finish(true, "TEST");
+      g.reset();
+    }
+    assert(g.round == 7 && !g.attacker && g.wins == 6);
+    g.finish(true, "TEST");
+    assert(g.matchOver && g.matchWon);
+  }
+  selectMap(0);
   // Mouse-driven weapon categories, secondary purchases, utility and match
   // flow.
   Interface menu;
@@ -332,6 +414,10 @@ int main(int argc, char **argv) {
     assert(found);
   };
   click(1);
+  assert(menu.page == ScreenPage::Vote && !menu.simulates());
+  click(400);
+  menu.vote.ballots.fill(0);
+  click(410);
   assert(menu.page == ScreenPage::Buy && g.round == 1 && g.freeze == 8);
   click(101);
   assert(g.primary == 1 && g.money == 800);
@@ -360,6 +446,10 @@ int main(int argc, char **argv) {
   menu.update(.01, g);
   assert(g.matchOver && menu.page == ScreenPage::Result);
   click(10);
+  assert(menu.page == ScreenPage::Vote);
+  click(400);
+  menu.vote.ballots.fill(0);
+  click(410);
   assert(!g.matchOver && g.round == 1 && g.wins == 0 &&
          menu.page == ScreenPage::Buy);
   // Freeze, movement, crouch and landing.
@@ -386,7 +476,8 @@ int main(int argc, char **argv) {
   assert(g.jumpHeight == 0);
   // Downloaded CC0 geometry actually loads UVs and non-flat texture images.
   assert(loadArt("assets"));
-  assert(lanternArt.faces.size() > 1000 && bottleArt.faces.size() > 1000);
+  assert(lanternArt.faces.size() > 1000 && bottleArt.faces.size() > 1000 &&
+         truckArt.faces.size() > 1000);
   std::unordered_set<uint32_t> colors(bottleArt.images[0].pixels.begin(),
                                       bottleArt.images[0].pixels.end());
   assert(colors.size() > 1000);
@@ -424,6 +515,19 @@ int main(int argc, char **argv) {
   assert(pixels[H / 2 * W + W / 2] != 0x10181C &&
          pixels[H / 2 * W + W / 2] != 0x578D98);
   aimBlend = 0;
+  for (int map = 0; map < 3; map++) {
+    selectMap(map);
+    game = Game();
+    game.x = arena.showcase.x;
+    game.y = arena.showcase.y;
+    game.a = .25;
+    game.weapon = 1;
+    game.owned[1] = true;
+    render();
+    assert(shadowField.revision == arena.revision);
+    assert(*std::max_element(zbuffer.begin(), zbuffer.end()) > 0);
+  }
+  selectMap(0);
   // Near-plane clipping and depth ordering remain correct with textured meshes.
   std::fill(pixels.begin(), pixels.end(), 0);
   std::fill(zbuffer.begin(), zbuffer.end(), 0);
@@ -433,7 +537,7 @@ int main(int argc, char **argv) {
          ((pixels[H / 2 * W + W / 2] >> 16) & 255));
   for (auto page : {ScreenPage::Home, ScreenPage::Pause, ScreenPage::Buy,
                     ScreenPage::Settings, ScreenPage::Utility,
-                    ScreenPage::Result, ScreenPage::Roster}) {
+                    ScreenPage::Result, ScreenPage::Roster, ScreenPage::Vote}) {
     game = Game();
     ui.page = page;
     render();
@@ -445,8 +549,8 @@ int main(int argc, char **argv) {
   }
   ui = Interface();
   game = Game();
-  game.x = 40;
-  game.y = 18;
+  game.x = arena.showcase.x;
+  game.y = arena.showcase.y;
   game.a = .2;
   game.pitch = -.03;
   game.weapon = 9;
@@ -456,11 +560,12 @@ int main(int argc, char **argv) {
   render();
   if (argc > 1)
     imageFile(argv[1]);
-  puts("PASS: 64x64 map/spawn separation, 16 weapons and paid secondaries, "
+  puts("PASS: three larger maps, 11-ballot voting and map activation, round "
+       "cover, map/spawn separation, 16 weapons and paid secondaries, "
        "two-slot inventory, six-round halves, first-to-seven match, paid "
        "utility persistence, burst/pellet/automatic cadence, armor, "
        "drops/pickups, bomb/timers, harder AI, autonomous rounds, mouse menus, "
-       "movement, CC0 UV assets, 3D animations/viewmodels, transparent "
+       "movement, licensed UV assets, 3D animations/viewmodels, transparent "
        "picture-in-picture scopes, depth and UI layouts");
   return 0;
 }

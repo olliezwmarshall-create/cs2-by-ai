@@ -1,22 +1,34 @@
-# Breach / Harbor — Match Edition
+# Breach / Operations
 
-An original offline C++17 tactical shooter for 64-bit Windows. **16 weapons, a 64×64 map, six-round side intervals, first-to-seven matches, harder team AI, recoverable weapon drops and paid utility.**
+An original offline C++17 tactical shooter for 64-bit Windows. **Three large maps, mouse-driven map voting, 16 weapons, six-round side intervals, first-to-seven matches, team AI, recoverable weapon drops and paid utility.**
 
 [Download Breach.zip](https://github.com/olliezwmarshall-create/cs2-by-ai/raw/refs/heads/main/dist/Breach.zip). Extract the **entire folder** and run **Breach.exe**. Keep the **assets** directory beside the executable: it contains the downloaded textured models. No installer or network connection is needed to play.
 
-Click Play / T Side or Play / CT Side, purchase your loadout, then click Back to Game. Escape opens a clickable pause menu. The shop, settings, roster and match/round results support mouse interaction.
+Click Play / T Side or Play / CT Side, vote for a map, purchase your loadout, then click Back to Game. Escape opens a clickable pause menu. The shop, settings, roster and match/round results support mouse interaction.
 
 ## Match rules
 
 - Your team stays on the same side for **six rounds**. Sides change before rounds **7 and 13**. Your team's score follows it across side changes.
-- **First team to seven round wins wins the MATCH.** A round result is not a match result. The final result screen announces Match Won / Match Lost and offers New Match instead of continuing the finished match.
+- **First team to seven round wins wins the MATCH.** A round result is not a match result. The final result screen announces Match Won / Match Lost and offers Vote Next Map instead of continuing the finished match.
 - **T immediately wins the round when every CT is eliminated, planted or not.** T can also win by detonating the bomb.
 - CT wins by eliminating every T before planting, surviving the pre-plant clock, or defusing. When every T dies after a plant, surviving CTs still have to defuse.
 - Hold F or mouse side button 2 for three seconds in a bomb site to plant, or five seconds within 1.8 units of the device to defuse. Movement, switching guns, reloading, utility or releasing the button interrupts the action.
 - Each round begins with eight seconds of freeze/buy time. The active round clock is **150 seconds**. Planting freezes that clock and starts a separate **40-second bomb countdown**.
 - Each side has five AI players, with you joining your selected side as an additional player. Your death switches to spectating if teammates remain; their round continues.
 
-Harbor covers **64×64 units**, four times the previous map's area. Separated spawns, a blocking central warehouse, two site courtyards, multiple building clusters, longer approaches and flanking connectors prevent immediate spawn-to-spawn firefights. The two sites are in the northeast and southeast. Match length still depends on combat and player choices; larger routes do not impose an artificial minimum round duration.
+## Maps and voting
+
+Choose between three distinct layouts, each larger than the previous 64×64 arena:
+
+| Map | Size | Scenery |
+| --- | --- | --- |
+| Shipyard | 80×80 | Warehouses, cranes, silos, cargo lanes and service vehicles |
+| Old Quarter | 88×88 | Stucco buildings, pitched tile roofs, arches and courtyards |
+| Radar Station | 96×96 | Radar domes, dishes, utility buildings and distant hills |
+
+Voting opens before a new match and after a finished match. Click a map card to cast or change your vote. You and the ten bots each have one ballot; bots submit theirs over several seconds. After all bots vote, you can start early. Otherwise the winning map starts after ten seconds. A tied human choice wins a tied ballot; other ties use the first listed map. The same map stays active throughout a match.
+
+Separated spawns, central buildings, two site courtyards, longer approaches and flanking connectors prevent immediate spawn-to-spawn firefights. Both sites remain on the CT side of each map. Round duration still depends on combat and player choices.
 
 ## Mouse and keyboard
 
@@ -102,9 +114,9 @@ Characters use articulated tapered limbs, knees/elbows, boots, armor, pouches, h
 
 Scopes have hollow 3D housings and a **picture-in-picture magnified lens**. Looking through one keeps the surrounding scene at normal magnification, with a reticle inside the lens. The former opaque full-screen scope mask is gone.
 
-Props include rounded barrels with hoops/caps, braced crates, corrugated cargo boxes and sloped barriers. Surface materials include perspective-correct masonry, paving, wood, metal and woven cloth, with lighting, shadows, contact shading, muzzle illumination, shell casings and bullet marks.
+Scenery includes continuous pitched roofs and gables, arches, drainpipes, roof vents, cranes, radar dishes, rounded tanks and domes, plus barrels, cargo and sloped barriers. Characters have rounded heads and helmets; weapon receivers, stocks and grips have bevelled edges. Surface materials include perspective-correct brick, stucco, paving, asphalt, wood, metal and woven cloth. Theme-specific sky and fog, cast shadows, contact shading, metal highlights and edge smoothing support the new shapes. Detail levels and visibility culling limit distant geometry cost.
 
-The game also includes **UV-mapped textured Lantern and WaterBottle models downloaded from KhronosGroup/glTF-Sample-Assets**, licensed CC0-1.0. Original authors, pinned source URLs, hashes, license links and conversion details are in [assets/CREDITS.md](assets/CREDITS.md) and [assets/sources.json](assets/sources.json). These props are converted and bundled locally. The software renderer uses their base-color images, not the full PBR material stack. The overall art remains stylized rather than photorealistic.
+The game includes **UV-mapped textured Lantern, WaterBottle and CesiumMilkTruck models downloaded from KhronosGroup/glTF-Sample-Assets**. Lantern and WaterBottle are CC0-1.0; CesiumMilkTruck is copyright 2017 Cesium and licensed CC-BY-4.0. Its license, attribution and trademark notice are included with the assets. Original authors, pinned source URLs, hashes, license links and conversion details are in [assets/CREDITS.md](assets/CREDITS.md) and [assets/sources.json](assets/sources.json). These props are converted and bundled locally. The software renderer uses their base-color images, not the full PBR material stack. The overall art remains stylized rather than photorealistic.
 
 ## Build and validation
 
@@ -122,7 +134,7 @@ g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer main.
 /tmp/breach-sanitized
 ```
 
-Checks cover all 16 purchases, primary/secondary replacement, six-round halves, first-to-seven match completion and restart, paid utility carryover/consumption, burst/pellet/automatic fire, armor, drops and ammo-preserving pickups, bomb/timer rules, harder AI, full autonomous rounds, map connectivity and spawn separation, menu hit areas, movement, actual downloaded UV/image data, every viewmodel and reload pose, transparent scope composition, clipping and depth.
+Checks cover all three map layouts, voting revisions/ties/timeouts, map activation, circular cover, all 16 purchases, primary/secondary replacement, six-round halves, first-to-seven match completion and restart, paid utility carryover/consumption, burst/pellet/automatic fire, armor, drops and ammo-preserving pickups, bomb/timer rules, harder AI, full autonomous rounds, map connectivity and spawn separation, menu hit areas, movement, actual downloaded UV/image data, every viewmodel and reload pose, transparent scope composition, clipping and depth.
 
 `tools/convert_gltf.py` reproduces the BRM asset conversion from the pinned GLB sources using Python, NumPy and Pillow; it is not needed to play or compile the game.
 

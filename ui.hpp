@@ -1,5 +1,5 @@
 #pragma once
-#include "game.hpp"
+#include "map_vote.hpp"
 #include <fstream>
 #include <sstream>
 enum class ScreenPage {
@@ -10,7 +10,8 @@ enum class ScreenPage {
   Settings,
   Utility,
   Result,
-  Roster
+  Roster,
+  Vote
 };
 struct Area {
   int x, y, w, h;
@@ -61,7 +62,9 @@ struct Interface {
   int mx = -1, my = -1, selectedUtility = 0, buyTab = 0, lastWeapon = 0;
   double feedbackTime = 0;
   std::string feedback;
-  bool quit = false;
+  bool quit = false, pendingTeam = true;
+  MapVote vote;
+  uint32_t voteSession = 0;
   bool capturesMouse() const { return page == ScreenPage::Play; }
   bool simulates() const {
     return page == ScreenPage::Play || page == ScreenPage::Buy ||
@@ -73,6 +76,16 @@ struct Interface {
                    const std::string &d, int id, bool enabled = true) {
       b.push_back({{x, y, w, h}, t, d, id, enabled});
     };
+    if (page == ScreenPage::Vote) {
+      for (int i = 0; i < 3; i++)
+        add(55 + i * 290, 150, 270, 300, MAP_NAMES[i],
+            std::to_string(MAP_SIZES[i]) + " x " +
+                std::to_string(MAP_SIZES[i]) + " / CAST VOTE",
+            400 + i);
+      add(590, 500, 315, 48, "START WINNING MAP", "", 410,
+          vote.botsDone() && vote.human >= 0);
+      add(55, 500, 180, 48, "CANCEL", "", 411);
+    }
     if (page == ScreenPage::Home) {
       add(70, 255, 320, 62, "PLAY / T SIDE",
           "Plant the bomb. Clear the sector.", 1);
@@ -150,8 +163,8 @@ struct Interface {
       add(380, 452, 200, 48, "RETURN", "", 5);
     }
     if (page == ScreenPage::Result) {
-      add(295, 315, 370, 64, g.matchOver ? "NEW MATCH" : "NEXT ROUND",
-          g.matchOver        ? "Start a fresh first-to-seven match"
+      add(295, 315, 370, 64, g.matchOver ? "VOTE NEXT MAP" : "NEXT ROUND",
+          g.matchOver        ? "Vote for the next match location"
           : g.round % 6 == 0 ? "HALFTIME / SWITCH SIDES"
                              : "Same team / continue the match",
           10);
@@ -161,6 +174,19 @@ struct Interface {
     if (page == ScreenPage::Roster)
       add(740, 470, 160, 48, "BACK", "", 5);
     return b;
+  }
+  void beginVote(Game &g, bool team) {
+    pendingTeam = team;
+    vote.begin(++voteSession);
+    open(ScreenPage::Vote, g);
+  }
+  void finishVote(Game &g) {
+    if (!vote.running)
+      return;
+    int map = vote.winner();
+    vote.close();
+    selectMap(map);
+    start(g, pendingTeam);
   }
   void start(Game &g, bool t) {
     g = Game();
@@ -185,6 +211,10 @@ struct Interface {
     switch (page) {
     case ScreenPage::Home:
       break;
+    case ScreenPage::Vote:
+      vote.close();
+      open(ScreenPage::Home, g);
+      break;
     case ScreenPage::Play:
       open(ScreenPage::Pause, g);
       break;
@@ -205,7 +235,21 @@ struct Interface {
   }
   void activate(int action, Game &g) {
     if (action == 1 || action == 2) {
-      start(g, action == 1);
+      beginVote(g, action == 1);
+      return;
+    }
+    if (action >= 400 && action <= 402) {
+      vote.choose(action - 400);
+      return;
+    }
+    if (action == 410) {
+      if (vote.botsDone() && vote.human >= 0)
+        finishVote(g);
+      return;
+    }
+    if (action == 411) {
+      vote.close();
+      open(ScreenPage::Home, g);
       return;
     }
     if (action == 3) {
@@ -240,7 +284,7 @@ struct Interface {
     }
     if (action == 10) {
       if (g.matchOver) {
-        start(g, g.startAttacker);
+        beginVote(g, g.startAttacker);
         return;
       }
       g.reset();
@@ -364,6 +408,11 @@ struct Interface {
     }
   }
   void update(double dt, Game &g) {
+    if (page == ScreenPage::Vote) {
+      vote.update(dt);
+      if (vote.expired())
+        finishVote(g);
+    }
     g.visualTime += dt;
     feedbackTime = std::max(0., feedbackTime - dt);
     if (g.ended && simulates())

@@ -1,4 +1,4 @@
-"""Convert pinned CC0 glTF sample GLBs into compact textured runtime meshes.
+"""Convert pinned licensed glTF sample GLBs into compact textured runtime meshes.
 Requires Python, NumPy and Pillow. Download sources separately; no network code.
 """
 import io,json,struct,sys

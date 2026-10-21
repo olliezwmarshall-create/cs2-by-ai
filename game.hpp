@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 constexpr double PI = 3.141592653589793;
-constexpr int W = 960, H = 600, MAP = 64;
+constexpr int W = 960, H = 600, MAP = 96;
 struct Vec {
   double x = 0, y = 0, z = 0;
   Vec operator+(Vec b) const { return {x + b.x, y + b.y, z + b.z}; }
@@ -19,8 +19,7 @@ double dist(double x, double y, double xx, double yy) {
   return std::hypot(x - xx, y - yy);
 }
 double wrap(double a) { return atan2(sin(a), cos(a)); }
-constexpr Vec HOME_T{5, 32, 0}, HOME_CT{59, 32, 0}, SITE_A{54, 12, 0},
-    SITE_B{54, 52, 0};
+Vec HOME_T{5, 40, 0}, HOME_CT{75, 40, 0}, SITE_A{70, 14, 0}, SITE_B{70, 66, 0};
 constexpr int WEAPON_COUNT = 16;
 bool secondaryGun(int gun) { return gun == 0 || (gun >= 5 && gun <= 7); }
 bool scopedGun(int gun) { return gun == 3 || gun == 4 || gun == 14; }
@@ -30,72 +29,203 @@ struct Box {
   uint32_t color;
   bool cover = true;
 };
+struct RoundSolid {
+  double x, y, r, h;
+  bool dome = false;
+  uint32_t color = 0x829599;
+};
+const std::array<const char *, 3> MAP_NAMES = {
+    {"SHIPYARD", "OLD QUARTER", "RADAR STATION"}};
+const std::array<int, 3> MAP_SIZES = {{80, 88, 96}};
 struct Arena {
+  int id = 0, size = 80, revision = 0;
   std::array<std::string, MAP> cells;
-  std::vector<Box> props, obstacles;
-  Arena() {
+  std::array<float, MAP * MAP> heights{};
+  std::vector<Box> props, obstacles, structures, extra;
+  std::vector<RoundSolid> rounds;
+  std::vector<Vec> lamps, bottles, trucks, arches;
+  Vec homeT, homeCT, siteA, siteB, showcase;
+  double showcaseAngle = .3;
+  Arena() { load(0); }
+  void load(int map) {
+    id = std::clamp(map, 0, 2);
+    size = MAP_SIZES[id];
+    revision++;
+    props.clear();
+    obstacles.clear();
+    structures.clear();
+    rounds.clear();
+    extra.clear();
+    lamps.clear();
+    bottles.clear();
+    trucks.clear();
+    arches.clear();
+    heights.fill(0);
+    homeT = {5, double(size / 2), 0};
+    homeCT = {double(size - 5), double(size / 2), 0};
+    siteA = {double(size - 10), 14, 0};
+    siteB = {double(size - 10), double(size - 14), 0};
     for (int y = 0; y < MAP; y++) {
-      cells[y] = std::string(MAP, '.');
-      for (int x = 0; x < MAP; x++)
-        if (!x || !y || x == MAP - 1 || y == MAP - 1)
-          cells[y][x] = '#';
+      cells[y] = std::string(MAP, '#');
+      for (int x = 0; x < MAP; x++) {
+        bool edge = x == 0 || y == 0 || x >= size - 1 || y >= size - 1;
+        cells[y][x] = edge ? '#' : '.';
+        if (edge)
+          heights[y * MAP + x] = 3.2;
+      }
     }
-    auto building = [&](int x0, int y0, int x1, int y1) {
+    auto building = [&](int x0, int y0, int x1, int y1, double h) {
       for (int y = y0; y <= y1; y++)
-        for (int x = x0; x <= x1; x++)
+        for (int x = x0; x <= x1; x++) {
           cells[y][x] = '#';
+          heights[y * MAP + x] = float(h);
+        }
+      structures.push_back({double(x0), double(y0), 0, double(x1 - x0 + 1),
+                            double(y1 - y0 + 1), h,
+                            id == 1   ? 0xC8B18Au
+                            : id == 2 ? 0x8D9FA6u
+                                      : 0xA8B7B5u});
     };
-    building(13, 8, 21, 24);
-    building(13, 40, 21, 55);
-    building(31, 9, 38, 22);
-    building(31, 42, 38, 55);
-    building(26, 29, 36, 35);
-    building(44, 22, 49, 28);
-    building(44, 36, 49, 43);
-    building(8, 29, 10, 35);
-    building(52, 28, 54, 36);
-    props = {{24, 17, 0, 1.5, 2, 1.4, 0x91724F},
-             {24, 46, 0, 1.5, 2, 1.4, 0x91724F},
-             {40, 15, 0, 2, 1.5, 1.3, 0x6B8286},
-             {41, 48, 0, 2, 1.5, 1.3, 0x6B8286},
-             {55, 8, 0, 1.4, 1.4, 1.1, 0x93744A},
-             {56, 55, 0, 1.4, 1.4, 1.1, 0x93744A},
-             {17, 28, 0, 2.5, 1.5, 1.2, 0x93744A},
-             {19, 36, 0, 2.5, 1.5, 1.2, 0x93744A},
-             {39, 31, 0, 1.4, 1.4, 1.7, 0x526E78},
-             {39, 34, 0, 1.4, 1.4, 1.7, 0x526E78},
-             {25, 52, 0, 1.2, 2, 1.3, 0x8B744B},
-             {26, 6, 0, 1.2, 2, 1.3, 0x8B744B},
-             {4, 20, 0, 1.2, 1.2, 1.1, 0x486873},
-             {5, 43, 0, 1.2, 1.2, 1.1, 0x486873}};
-    for (int y = 0; y < MAP; y++)
-      for (int x = 0; x < MAP; x++)
+    int mid = size / 2;
+    building(8, mid - 3, 10, mid + 3, 3.8);
+    building(size - 12, mid - 4, size - 10, mid + 4, 4.4);
+    if (id == 0) {
+      building(16, 10, 26, mid - 10, 5.2);
+      building(16, mid + 10, 26, size - 11, 5.2);
+      building(36, 10, 44, mid - 13, 5.8);
+      building(36, mid + 13, 44, size - 11, 5.8);
+      building(31, mid - 4, 45, mid + 3, 6.1);
+      building(size - 23, mid - 13, size - 17, mid - 7, 4.8);
+      building(size - 23, mid + 7, size - 17, mid + 14, 4.8);
+      showcase = {24, 31, 0};
+      showcaseAngle = .3;
+    }
+    if (id == 1) {
+      building(16, 12, 27, 30, 5.8);
+      building(16, mid + 12, 27, size - 13, 5.8);
+      building(37, 8, 45, mid - 13, 6.4);
+      building(35, mid + 13, 45, size - 9, 6.4);
+      building(33, mid - 5, 46, mid + 4, 5.4);
+      building(size - 24, 24, size - 18, 31, 5.5);
+      building(size - 25, size - 31, size - 18, size - 23, 5.5);
+      showcase = {28, 34, 0};
+      showcaseAngle = .2;
+      arches = {{30, double(mid - 10), 0}, {49, double(mid + 10), 0}};
+    }
+    if (id == 2) {
+      building(17, 12, 29, mid - 15, 5.2);
+      building(17, mid + 15, 29, size - 13, 5.2);
+      building(39, 9, 49, mid - 17, 4.7);
+      building(39, mid + 17, 49, size - 10, 4.7);
+      building(36, mid - 5, 52, mid + 4, 5.9);
+      building(size - 27, mid - 15, size - 20, mid - 8, 4.8);
+      building(size - 27, mid + 8, size - 20, mid + 15, 4.8);
+      showcase = {50.5, 17, 0};
+      showcaseAngle = -.8;
+    }
+    props = {{29, 18, 0, 1.6, 2, 1.4, 0x8E7957},
+             {29, double(size - 19), 0, 1.6, 2, 1.4, 0x8E7957},
+             {double(mid + 7), 18, 0, 2, 1.5, 1.3, 0x718A8A},
+             {double(mid + 8), double(size - 19), 0, 2, 1.5, 1.3, 0x718A8A},
+             {siteA.x + 2, siteA.y - 5, 0, 1.5, 1.5, 1.2, 0x9B8059},
+             {siteB.x + 2, siteB.y + 4, 0, 1.5, 1.5, 1.2, 0x9B8059},
+             {19, double(mid - 5), 0, 2.5, 1.5, 1.2, 0x93744A},
+             {23, double(mid + 5), 0, 2.5, 1.5, 1.2, 0x93744A}};
+    for (Vec p :
+         std::array<Vec, 4>{{{31, 10, 0},
+                             {31, double(size - 11), 0},
+                             {double(size - 16), 20, 0},
+                             {double(size - 16), double(size - 21), 0}}})
+      rounds.push_back({p.x, p.y, id == 2 ? 2. : 1.3, id == 1 ? 1.5 : 2.8,
+                        id != 1, id == 1 ? 0xBCB09Au : 0x789395u});
+    if (id == 1) {
+      rounds.push_back(
+          {double(mid + 8), double(mid + 1), 2.2, .6, false, 0x9BADA6});
+    }
+    if (id == 2) {
+      rounds.push_back({double(mid + 7), 8, 3., 2.2, true, 0xB7C6C5});
+      rounds.push_back(
+          {double(mid + 7), double(size - 9), 3., 2.2, true, 0xB7C6C5});
+    }
+    lamps = {{15, double(mid - 8), 0},
+             {30, double(mid + 9), 0},
+             {double(size - 25), 19, 0},
+             {double(size - 16), double(size - 19), 0}};
+    bottles = {{props[0].x + .4, props[0].y + .4, props[0].h},
+               {props[4].x + .4, props[4].y + .4, props[4].h}};
+    trucks = {{double(mid - 10), double(mid - 10), 0},
+              {double(size - 17), double(size - 13), 0}};
+    for (auto p : trucks)
+      extra.push_back({p.x - 1.3, p.y - 2.27, 0, 2.6, 4.54, 2.4, 0});
+    for (auto p : arches)
+      for (int side : {-1, 1})
+        extra.push_back({p.x - .25, p.y + side * 2.5 - .25, 0, .5, .5, 3.8, 0});
+    for (int y = 0; y < size; y++)
+      for (int x = 0; x < size; x++)
         if (cells[y][x] == '#')
           obstacles.push_back(
               {double(x), double(y), 0, 1, 1, wallHeight(x, y), 0});
     obstacles.insert(obstacles.end(), props.begin(), props.end());
+    obstacles.insert(obstacles.end(), extra.begin(), extra.end());
   }
   double wallHeight(int x, int y) const {
-    return (x == 0 || y == 0 || x == MAP - 1 || y == MAP - 1)
-               ? 3.
-               : 3.4 + (x / 5 % 2) * .8;
+    return x < 0 || y < 0 || x >= size || y >= size ? 3.2
+                                                    : heights[y * MAP + x];
   }
   bool wall(double x, double y) const {
-    return x < 0 || y < 0 || x >= MAP || y >= MAP ||
+    return x < 0 || y < 0 || x >= size || y >= size ||
            cells[int(y)][int(x)] == '#';
   }
   bool solid(double x, double y, double margin = 0) const {
     if (wall(x - margin, y - margin) || wall(x + margin, y - margin) ||
         wall(x - margin, y + margin) || wall(x + margin, y + margin))
       return true;
-    for (auto p : props)
-      if (p.cover && x + margin > p.x && x - margin < p.x + p.w &&
-          y + margin > p.y && y - margin < p.y + p.d)
+    for (const auto &list : {&props, &extra})
+      for (auto p : *list)
+        if (p.cover && x + margin > p.x && x - margin < p.x + p.w &&
+            y + margin > p.y && y - margin < p.y + p.d)
+          return true;
+    for (auto c : rounds)
+      if (dist(x, y, c.x, c.y) < c.r + margin)
         return true;
     return false;
   }
+  double heightAt(double x, double y) const {
+    if (x < 0 || y < 0 || x >= size || y >= size)
+      return 0;
+    double h = wall(x, y) ? wallHeight(int(x), int(y)) : 0;
+    for (const auto &list : {&props, &extra})
+      for (auto p : *list)
+        if (x > p.x && x < p.x + p.w && y > p.y && y < p.y + p.d)
+          h = std::max(h, p.z + p.h);
+    for (auto c : rounds) {
+      double d = dist(x, y, c.x, c.y);
+      if (d < c.r)
+        h = std::max(h, c.h + (c.dome ? sqrt(c.r * c.r - d * d) : 0));
+    }
+    return h;
+  }
+  Vec safe(Vec p) const {
+    if (!solid(p.x, p.y, .3))
+      return p;
+    for (int radius = 1; radius < 9; radius++)
+      for (int dy = -radius; dy <= radius; dy++)
+        for (int dx = -radius; dx <= radius; dx++) {
+          Vec q = {floor(p.x) + dx + .5, floor(p.y) + dy + .5, 0};
+          if (!solid(q.x, q.y, .3))
+            return q;
+        }
+    return homeT;
+  }
 };
 Arena arena;
+void selectMap(int id) {
+  arena.load(id);
+  HOME_T = arena.homeT;
+  HOME_CT = arena.homeCT;
+  SITE_A = arena.siteA;
+  SITE_B = arena.siteB;
+}
 bool solid(double x, double y) { return arena.solid(x, y); }
 double boxHit(Vec o, Vec dir, Box b) {
   double lo = 0, hi = 1000;
@@ -116,6 +246,34 @@ double boxHit(Vec o, Vec dir, Box b) {
     }
   }
   return lo;
+}
+double roundHit(Vec o, Vec d, RoundSolid c) {
+  double best = 1000, ox = o.x - c.x, oy = o.y - c.y, A = d.x * d.x + d.y * d.y,
+         B = 2 * (ox * d.x + oy * d.y), C = ox * ox + oy * oy - c.r * c.r;
+  if (A > 1e-9) {
+    double disc = B * B - 4 * A * C;
+    if (disc >= 0)
+      for (double t :
+           {(-B - sqrt(disc)) / (2 * A), (-B + sqrt(disc)) / (2 * A)})
+        if (t >= 0 && o.z + d.z * t >= 0 && o.z + d.z * t <= c.h)
+          best = std::min(best, t);
+  }
+  if (std::abs(d.z) > 1e-9)
+    for (double z : {0., c.h}) {
+      double t = (z - o.z) / d.z;
+      if (t >= 0 && dist(o.x + d.x * t, o.y + d.y * t, c.x, c.y) <= c.r)
+        best = std::min(best, t);
+    }
+  if (c.dome) {
+    Vec v = o - Vec{c.x, c.y, c.h};
+    double q = d.x * v.x + d.y * v.y + d.z * v.z,
+           disc = q * q - (v.x * v.x + v.y * v.y + v.z * v.z - c.r * c.r);
+    if (disc >= 0)
+      for (double t : {-q - sqrt(disc), -q + sqrt(disc)})
+        if (t >= 0 && o.z + d.z * t >= c.h)
+          best = std::min(best, t);
+  }
+  return best;
 }
 Vec direction(double a, double pitch = 0) {
   return {cos(a) * cos(pitch), sin(a) * cos(pitch), sin(pitch)};
@@ -258,7 +416,7 @@ struct Game {
     burstRemaining = 0;
     equipAnim = 0;
     drops.clear();
-    a = attacker ? 0 : PI;
+    a = attacker ? -PI / 2 : PI / 2;
     pitch = shot = muzzle = reload = time = hurt = hit = recoil = steps =
         flash = plantProgress = defuseProgress = beep = boltCycle = 0;
     freeze = vx = vy = stance = jumpHeight = jumpVelocity = 0;
@@ -274,13 +432,15 @@ struct Game {
     won = ended = planted = usingObjective = buyOpen = walking = ads = false;
     result.clear();
     bots.clear();
-    const std::array<Vec, 5> tSpawn = {
-        {{5, 28, 0}, {5, 35, 0}, {5, 38, 0}, {3, 31, 0}, {3, 34, 0}}};
-    const std::array<Vec, 5> ctSpawn = {
-        {{57, 12, 0}, {57, 52, 0}, {58, 25, 0}, {59, 39, 0}, {60, 34, 0}}};
+    std::array<Vec, 5> tSpawn = {
+        {HOME_T + Vec{0, -4, 0}, HOME_T + Vec{0, 3, 0}, HOME_T + Vec{0, 6, 0},
+         HOME_T + Vec{-2, -1, 0}, HOME_T + Vec{-2, 2, 0}}};
+    std::array<Vec, 5> ctSpawn = {
+        {SITE_A + Vec{3, 0, 0}, SITE_B + Vec{3, 0, 0}, HOME_CT + Vec{-1, -7, 0},
+         HOME_CT + Vec{0, 7, 0}, HOME_CT + Vec{1, 2, 0}}};
     for (int team = 0; team < 2; team++)
       for (int i = 0; i < 5; i++) {
-        Vec p = team ? tSpawn[i] : ctSpawn[i];
+        Vec p = arena.safe(team ? tSpawn[i] : ctSpawn[i]);
         Bot bot{p.x, p.y};
         bot.terrorist = team;
         bot.role = i;
@@ -344,6 +504,8 @@ struct Game {
       best = std::min(best, -origin.z / dir.z);
     for (const auto &obstacle : arena.obstacles)
       best = std::min(best, boxHit(origin, dir, obstacle));
+    for (auto c : arena.rounds)
+      best = std::min(best, roundHit(origin, dir, c));
     return best;
   }
   bool obscured(double ox, double oy, double tx, double ty) const {

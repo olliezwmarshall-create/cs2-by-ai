@@ -429,9 +429,9 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
     if (home) {
       double x = game.x, y = game.y, a = game.a, p = game.pitch;
       int gun = game.weapon;
-      game.x = 24;
-      game.y = 26;
-      game.a = .25;
+      game.x = arena.showcase.x;
+      game.y = arena.showcase.y;
+      game.a = arena.showcaseAngle;
       game.pitch = -.03;
       game.weapon = 1;
       drawWorld();
@@ -495,7 +495,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
   RegisterClassA(&wc);
   RECT r = {0, 0, W, H};
   AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-  HWND win = CreateWindowA(wc.lpszClassName, "Breach / Harbor",
+  HWND win = CreateWindowA(wc.lpszClassName, "Breach / Operations",
                            WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
                            CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                            nullptr, nullptr, inst, nullptr);

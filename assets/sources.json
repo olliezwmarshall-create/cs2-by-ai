@@ -16,5 +16,17 @@
     "derived_file": "bottle.brm",
     "derived_sha256": "5f8a350603572ec57e1cdbf376abc55a72236dd612ed1fa731eab170b3e50beb",
     "modifications": "Converted coordinates, normalized height, retained UVs, resized base-color textures to 256 pixels and packed into BRM1."
+  },
+  {
+    "name": "CesiumMilkTruck",
+    "author": "Cesium",
+    "copyright": "Copyright 2017 Cesium",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/15cd02d304e54cb42a4db4eefe719f76190f4b68/Models/CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "source_sha256": "09371b34608116de5842d23abe260bf11acf3e1554daf334a647eb566eee5c49",
+    "derived_file": "truck.brm",
+    "derived_sha256": "975fb98600f02bc5ded831e7e056a6ac91f9f08510d2532e4a7c0b2458ed5f24",
+    "modifications": "Converted coordinates, normalized height, resized base-color textures to 256 pixels, packed mesh into BRM1; displayed as static scenery."
   }
 ]

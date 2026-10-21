@@ -126,9 +126,9 @@ void Game::tickBots(double dt) {
       b.state = int(i) == planter ? "PLANT" : "ESCORT";
       doingObjective = true;
       // Flankers use the other connector before converging on the bomb site.
-      if (b.role == 3 && b.x < 40) {
-        gx = 40;
-        gy = chosenSite.y == SITE_A.y ? 38 : 26;
+      if (b.role == 3 && b.x < arena.size * .55) {
+        gx = arena.size * .55;
+        gy = arena.size * .5 + (chosenSite.y == SITE_A.y ? 7 : -7);
         b.state = "FLANK";
       }
       if (sees && best < 12 && int(i) != planter) {
@@ -138,7 +138,7 @@ void Game::tickBots(double dt) {
         b.state = "ENGAGE";
       }
     } else {
-      gx = b.role == 2 ? 40 : SITE_A.x;
+      gx = b.role == 2 ? arena.size * .55 : SITE_A.x;
       gy = b.role % 2 ? SITE_B.y : SITE_A.y;
       b.state = "GUARD";
       if (b.knows && b.alert > 0) {
