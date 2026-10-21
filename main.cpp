@@ -143,9 +143,11 @@ struct Audio {
   }
 };
 bool keys[256] = {}, mouse = false, captured = false;
+bool fireWasDown = false, pressPending = false;
 HFONT font = nullptr;
 void capture(HWND win, bool on) {
   captured = on;
+  fireWasDown = pressPending = false;
   mouse = false;
   aiming = false;
   game.usingObjective = false;
@@ -189,9 +191,11 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
                           &size, sizeof(RAWINPUTHEADER)) != UINT(-1) &&
           raw.header.dwType == RIM_TYPEMOUSE &&
           !(raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
-        game.a = wrap(game.a + raw.data.mouse.lLastX * .0022);
-        game.pitch =
-            std::clamp(game.pitch - raw.data.mouse.lLastY * .0022, -1.15, 1.15);
+        game.a = wrap(game.a + raw.data.mouse.lLastX * .0022 *
+                                   (aiming ? 630 / focal() : 1));
+        game.pitch = std::clamp(game.pitch - raw.data.mouse.lLastY * .0022 *
+                                                 (aiming ? 630 / focal() : 1),
+                                -1.15, 1.15);
       }
     }
     return 0;
@@ -207,12 +211,14 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
         game.startReload();
       if (w == 'B' && game.buyAllowed())
         game.buyOpen = !game.buyOpen;
-      if (w >= '1' && w <= '5') {
+      if (w >= '1' && w <= '6') {
         if (game.buyOpen)
           game.buy(int(w - '0'));
-        else if (w <= '4')
+        else if (w <= '5')
           game.switchWeapon(int(w - '1'));
       }
+      if (w == 'V' && game.hp <= 0)
+        game.spectator++;
       if (w == 'Q')
         game.utility = (game.utility + 1) % 3;
       if (w == 'G')
@@ -275,14 +281,16 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
               std::string(game.attacker ? "ATTACK" : "DEFEND"));
     label(back, 175, 43,
           "ROUND " + std::to_string(game.round) + "   TIME " +
-              std::to_string(int(std::max(0., game.clock))) + "   ALIVE " +
-              std::to_string(5 - game.kills) + "   $" +
+              (game.planted ? std::string("FROZEN")
+                            : std::to_string(int(std::max(0., game.clock)))) +
+              "   T " + std::to_string(game.alive(true)) + " / CT " +
+              std::to_string(game.alive(false)) + "   $" +
               std::to_string(game.money));
     label(back, 175, 67, game.objectiveText());
     label(back, 175, 91,
           "SCORE " + std::to_string(game.wins) + " : " +
               std::to_string(game.losses) +
-              "   B: buy   1-4: weapons   Q: utility   G: throw");
+              "   B: buy   1-5: weapons   Q: utility   G: throw");
     label(back, 28, H - 58,
           "HP " + std::to_string(game.hp) + "  ARMOR " +
               std::to_string(game.armor));
@@ -302,13 +310,13 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
     if (game.buyOpen) {
       label(back, 268, 165, "SUPPLY / BUY ZONE - B TO CLOSE");
       label(back, 268, 202, "1 CARBINE $2400   2 SMG $1200");
-      label(back, 268, 232, "3 MARKSMAN $3500  4 ARMOR $650");
-      label(back, 268, 262, "5 UTILITY REFILL $300");
+      label(back, 268, 232, "3 BOLT SNIPER $3500  4 ARMOR $650");
+      label(back, 268, 262, "5 UTILITY $300    6 SCOUT DMR $2800");
       label(back, 268, 300, "Purchase in spawn during first 22 seconds.");
       label(back, 268, 330,
             "Pistol always available. Equipment persists on wins.");
       label(back, 268, 360,
-            "Weapons: 1 Pistol / 2 Carbine / 3 SMG / 4 Marksman");
+            "Weapons: 1 Pistol / 2 Carbine / 3 SMG / 4 Bolt / 5 DMR");
     }
     if (!captured) {
       label(back, 270, 440, "CLICK TO CAPTURE MOUSE / RESUME");
@@ -317,13 +325,30 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
       label(back, 180, 488,
             "F hold plant / defuse | Shift sprint | Esc release mouse / quit");
     }
+    if (game.hp <= 0 && !game.ended) {
+      int id = game.spectating();
+      label(back, 280, 180,
+            id >= 0 ? "SPECTATING " + game.botName(id) + " | V: NEXT TEAMMATE"
+                    : "ELIMINATED - ROUND CONTINUES");
+    }
+    for (size_t i = 0; i < game.feed.size(); i++)
+      label(back, 630, 125 + int(i) * 20, game.feed[i]);
+    if (game.boltCycle > 0)
+      label(back, W / 2 - 70, H - 65, "CYCLING BOLT...");
     if (game.ended)
       label(back, 245, 210, game.result + " - ENTER: NEXT ROUND");
     if (keys[VK_TAB]) {
-      label(back, 270, 380,
-            "YOU   KILLS " + std::to_string(game.kills) + "   MATCH " +
-                std::to_string(game.wins) + " : " +
-                std::to_string(game.losses));
+      label(back, 200, 170, "TEAM ROSTER / STATUS / KILLS");
+      for (size_t i = 0; i < game.bots.size(); i++) {
+        auto &b = game.bots[i];
+        label(back, 180 + int(b.terrorist) * 370, 200 + b.role * 30,
+              game.botName(int(i)) + " " + (b.hp > 0 ? b.state : "DEAD") +
+                  "  " + std::to_string(b.frags));
+      }
+      label(back, 200, 375,
+            "YOU " + std::string(game.attacker ? "T" : "CT") + "  HP " +
+                std::to_string(game.hp) + "  KILLS " +
+                std::to_string(game.kills));
     }
     RECT r;
     GetClientRect(win, &r);
@@ -363,6 +388,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
   QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&last);
   MSG msg = {};
+  double accumulator = 0;
   while (true) {
     while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
       if (msg.message == WM_QUIT) {
@@ -376,28 +402,42 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     double dt =
         std::min(.05, double(now.QuadPart - last.QuadPart) / freq.QuadPart);
     last = now;
-    moving = false;
-    game.walking = false;
-    game.ads = aiming;
+    bool held = mouse || keys[VK_SPACE];
     if (captured && GetForegroundWindow() == win) {
-      if (!game.ended && !game.buyOpen) {
-        game.a = wrap(game.a + (keys[VK_RIGHT] - keys[VK_LEFT]) * dt * 2);
-        game.usingObjective = keys['F'];
-        double forward = keys['W'] - keys['S'], side = keys['D'] - keys['A'],
-               len = std::max(1., hypot(forward, side));
-        double speed = keys[VK_SHIFT] && !aiming ? 3.7 : aiming ? 1.45 : 2.6;
-        forward *= dt * speed / len;
-        side *= dt * speed / len;
-        game.move(cos(game.a) * forward - sin(game.a) * side,
-                  sin(game.a) * forward + cos(game.a) * side);
-        moving = game.walking;
-        if (mouse || keys[VK_SPACE])
-          game.fire();
-      } else
-        game.usingObjective = false;
-      game.tick(dt);
-      if (!game.buyAllowed())
-        game.buyOpen = false;
+      pressPending = pressPending || (held && !fireWasDown);
+      fireWasDown = held;
+      accumulator += dt;
+      constexpr double fixed = 1. / 240.;
+      while (accumulator >= fixed) {
+        game.walking = false;
+        moving = false;
+        game.ads = aiming;
+        if (!game.ended && !game.buyOpen && game.hp > 0) {
+          game.a = wrap(game.a + (keys[VK_RIGHT] - keys[VK_LEFT]) * fixed * 2);
+          game.usingObjective = keys['F'];
+          double forward = keys['W'] - keys['S'], side = keys['D'] - keys['A'],
+                 len = std::max(1., hypot(forward, side));
+          double speed = keys[VK_SHIFT] && !aiming ? 3.7 : aiming ? 1.45 : 2.6;
+          forward *= fixed * speed / len;
+          side *= fixed * speed / len;
+          game.move(cos(game.a) * forward - sin(game.a) * side,
+                    sin(game.a) * forward + cos(game.a) * side);
+          moving = game.walking;
+        } else {
+          game.usingObjective = false;
+          if (game.hp <= 0)
+            aiming = false;
+        }
+        game.tick(fixed);
+        game.trigger(held, pressPending);
+        pressPending = false;
+        if (!game.buyAllowed())
+          game.buyOpen = false;
+        accumulator -= fixed;
+      }
+    } else {
+      accumulator = 0;
+      fireWasDown = pressPending = false;
     }
     audio.pump();
     InvalidateRect(win, nullptr, FALSE);

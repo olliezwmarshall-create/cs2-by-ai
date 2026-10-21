@@ -34,14 +34,25 @@ void ellipse(int cx, int cy, int rx, int ry, unsigned c) {
       if (double(x * x) / (rx * rx) + double(y * y) / (ry * ry) <= 1)
         rect(cx + x, cy + y, 1, 1, c);
 }
-double focal() { return aiming ? (game.weapon == 3 ? 1150 : 850) : 630; }
+double projectionOverride = 0;
+double focal() {
+  return projectionOverride > 0
+             ? projectionOverride
+             : (aiming && game.hp > 0 ? (game.weapon == 3   ? 1400
+                                         : game.weapon == 4 ? 1100
+                                                            : 850)
+                                      : 630);
+}
 struct Camera {
   double ca, sa, cp, sp;
+  Vec origin;
   Camera()
-      : ca(cos(game.a)), sa(sin(game.a)), cp(cos(game.pitch)),
-        sp(sin(game.pitch)) {}
+      : Camera(game.eye(), game.viewAngle(), game.hp > 0 ? game.pitch : 0) {}
+  Camera(Vec eye, double angle, double pitch)
+      : ca(cos(angle)), sa(sin(angle)), cp(cos(pitch)), sp(sin(pitch)),
+        origin(eye) {}
   Vec transform(Vec p) const {
-    p = p - Vec{game.x, game.y, 1.6};
+    p = p - origin;
     double forward = p.x * ca + p.y * sa;
     return {-p.x * sa + p.y * ca, p.z * cp - forward * sp,
             forward * cp + p.z * sp};
@@ -135,7 +146,7 @@ void drawWorld() {
       pixels[y * W + x] = rgb(48 + y / 24, 69 + y / 30, 91 + y / 40);
   for (int y = 0; y < MAP; y++)
     for (int x = 0; x < MAP; x++) {
-      if (dist(game.x, game.y, x + .5, y + .5) > 42)
+      if (dist(camera.origin.x, camera.origin.y, x + .5, y + .5) > 42)
         continue;
       double xx = x, yy = y;
       unsigned ground = (x + y) % 2 ? 0x79786C : 0x727468;
@@ -185,7 +196,12 @@ void drawWorld() {
       continue;
     }
     double anim = b.path.empty() ? 0 : sin(game.time * 9 + i) * .13;
-    unsigned cloth = game.attacker ? 0x456478 : 0x827149;
+    if (int(i) == game.spectating())
+      continue;
+    unsigned cloth = b.terrorist ? 0x827149 : 0x456478;
+    if (b.terrorist == game.attacker)
+      cube({b.x - .06, b.y - .06, 2.02, .12, .12, .12, 0x8FE5A7, false},
+           camera);
     cube({b.x - .23, b.y - .17, .7, .46, .34, .7, cloth}, camera);
     cube({b.x - .19, b.y - .21, .88, .38, .42, .44, 0x303C40}, camera);
     cube({b.x - .16, b.y - .15, 1.43, .32, .3, .32, 0xB9A07D}, camera);
@@ -196,7 +212,7 @@ void drawWorld() {
     cube({b.x + .04, b.y - .13 - anim, .14, .16, .25, .59, cloth}, camera);
     cube({b.x - .2, b.y - .21 + anim, .04, .17, .36, .16, 0x263035}, camera);
     cube({b.x + .04, b.y - .21 - anim, .04, .17, .36, .16, 0x263035}, camera);
-    double angle = atan2(game.y - b.y, game.x - b.x);
+    double angle = b.facing;
     Vec muzzle = {b.x + cos(angle) * .55, b.y + sin(angle) * .55, 1.3};
     beam({b.x, b.y, 1.3}, muzzle, .055, 0x202B30, camera);
     if (b.flash > 0)
@@ -230,7 +246,7 @@ void drawWorld() {
   for (auto c : game.smokes) {
     Vec pos = camera.transform({c.x, c.y, 1.3});
     if (pos.z < .1) {
-      if (dist(game.x, game.y, c.x, c.y) < 2.4)
+      if (dist(camera.origin.x, camera.origin.y, c.x, c.y) < 2.4)
         for (auto &p : pixels)
           p = rgb(int(((p >> 16) & 255) * .12 + 115),
                   int(((p >> 8) & 255) * .12 + 122),
@@ -257,54 +273,11 @@ void drawWorld() {
       }
   }
 }
+#include "viewmodel.hpp"
 void render() {
   drawWorld();
-  double phase = game.reload > 0 ? 1 - game.reload / game.gun().reload : 0;
-  int drop = game.reload > 0 ? int(sin(phase * PI) * 110) : 0;
-  int bob = moving ? int(sin(game.time * 11) * 4) : 0;
-  int gx = (aiming ? W / 2 : W / 2 + 100) +
-           (moving ? int(cos(game.time * 5.5) * 3) : 0),
-      gy = H - 85 - (aiming ? 60 : 0) + drop + bob + int(game.recoil * 17);
-  ellipse(gx - 65, gy + 95, 65, 85, 0x303E37);
-  ellipse(gx + 90, gy + 105, 70, 85, 0x303E37);
-  rect(gx - 48, gy - 20, 25, 85, 0x9B836A);
-  rect(gx + 39, gy + 4, 28, 65, 0x9B836A);
-  if (game.weapon == 0) {
-    rect(gx - 19, gy - 85, 38, 125, 0x252D34);
-    rect(gx - 19, gy - 90, 38, 50, 0x7F8B8C);
-    rect(gx - 14, gy - 84, 28, 8, 0x313B42);
-    rect(gx - 7, gy - 96, 14, 8, 0xC6D7CB);
-  } else {
-    unsigned color = game.weapon == 2   ? 0x4E5A60
-                     : game.weapon == 3 ? 0x667252
-                                        : 0x3D484F;
-    int barrel = game.weapon == 3 ? 190 : game.weapon == 2 ? 125 : 151;
-    rect(gx - 24, gy - 104, 48, 142, 0x171F24);
-    rect(gx - 18, gy - 100, 36, 125, color);
-    rect(gx - 12, gy - 99, 8, 120, shade(color, 1.4));
-    rect(gx - 13, gy - barrel, 26, barrel - 87, 0x252F35);
-    rect(gx - 18, gy - 109, 36, 10, 0x11191D);
-    for (int i = 0; i < 7; i++)
-      rect(gx - 21, gy - 80 + i * 9, 42, 3, 0x1D272E);
-    rect(gx - 32, gy + 13, 64, 54, 0x202A30);
-    rect(gx - 17, gy + 18, 34, 34, 0x4C565B);
-    rect(gx - 7, gy - 155, 14, 5, 0x899795);
-    if (game.weapon == 3) {
-      ellipse(gx, gy - 30, 24, 32, 0x151F24);
-      ellipse(gx, gy - 30, 16, 24, 0x526E75);
-    }
-  }
-  int magdrop = game.reload > 0 ? int(sin(phase * PI) * 100) : 0;
-  rect(gx - 19 - magdrop / 3, gy + 56 + magdrop, 38, 75, 0x343D3F);
-  for (int i = 0; i < 5; i++)
-    rect(gx - 15 - magdrop / 3, gy + 63 + magdrop + i * 12, 29, 3, 0x202A2C);
-  if (game.muzzle > 0 && game.reload <= 0) {
-    int flashY = gy - (game.weapon == 0 ? 106 : game.weapon == 3 ? 200 : 166);
-    ellipse(gx, flashY, 22, 12, 0xFFB44C);
-    line(gx - 35, flashY - 9, gx + 35, flashY + 11, 0xFFE9AF, 4);
-    line(gx, flashY - 24, gx, flashY + 26, 0xFFE9AF, 4);
-  }
-  if (aiming && game.weapon == 3) {
+  drawViewmodel();
+  if (aiming && game.hp > 0 && (game.weapon == 3 || game.weapon == 4)) {
     for (int y = 0; y < H; y++)
       for (int x = 0; x < W; x++)
         if ((x - W / 2) * (x - W / 2) + (y - H / 2) * (y - H / 2) > 260 * 260)
@@ -346,6 +319,9 @@ void render() {
   int mx = 20 + int(game.x * 4), my = 20 + int(game.y * 4);
   rect(mx - 2, my - 2, 4, 4, 0x85D7C4);
   line(mx, my, mx + int(cos(game.a) * 8), my + int(sin(game.a) * 8), 0x85D7C4);
+  for (auto &b : game.bots)
+    if (b.hp > 0 && b.terrorist == game.attacker)
+      rect(20 + int(b.x * 4) - 1, 20 + int(b.y * 4) - 1, 3, 3, 0x75B1E2);
   if (game.planted)
     rect(20 + int(game.bombX * 4) - 2, 20 + int(game.bombY * 4) - 2, 4, 4,
          0xF35A41);

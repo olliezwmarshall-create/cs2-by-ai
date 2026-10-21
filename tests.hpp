@@ -70,7 +70,8 @@ int main(int argc, char **argv) {
   g.walking = false;
   simulate(g, 3.1);
   assert(g.planted);
-  g.bots.clear();
+  g.bots = {{3, 3}};
+  g.bots[0].blind = 1000;
   simulate(g, 40.1);
   assert(g.ended && g.won && g.result == "BOMB DETONATED");
   g = Game();
@@ -81,7 +82,7 @@ int main(int argc, char **argv) {
   g.bombX = 27;
   g.bombY = 5;
   simulate(g, 5.2);
-  assert(g.ended && !g.won && g.result == "DEFENDERS DEFUSED THE BOMB");
+  assert(g.ended && !g.won && g.result == "CT WIN - BOMB DEFUSED");
   // Defender role, bot planting, defuse interruption and successful defuse.
   g = Game();
   g.reset();
@@ -89,6 +90,7 @@ int main(int argc, char **argv) {
   g.x = 3;
   g.y = 16;
   g.bots = {{27, 5}};
+  g.bots[0].terrorist = true;
   simulate(g, 3.2);
   assert(g.planted);
   g.bots.clear();
@@ -173,6 +175,150 @@ int main(int argc, char **argv) {
   g.bots[0].cooldown = 0;
   g.tick(.02);
   assert(g.bots[0].reload > 0);
+  // Five autonomous players per team, plus the human on their side.
+  g = Game();
+  int ts = 0, cts = 0;
+  for (auto &b : g.bots)
+    (b.terrorist ? ts : cts)++;
+  assert(ts == 5 && cts == 5 && g.alive(true) == 6 && g.alive(false) == 5);
+  // Round clock freezes after plant; the bomb retains a separate live clock.
+  g.bots = {{3, 3}};
+  g.bots[0].blind = 1000;
+  g.planted = true;
+  g.bombX = 27;
+  g.bombY = 5;
+  double frozen = g.clock;
+  simulate(g, 1);
+  assert(g.clock == frozen && g.bombClock < 39.1);
+  // CT elimination ends the round immediately before OR after planting.
+  for (bool planted : {false, true}) {
+    g = Game();
+    g.bots = {{5, 16}};
+    g.planted = planted;
+    g.fire();
+    assert(g.ended && g.won && g.result == "T WIN - ALL CT ELIMINATED");
+  }
+  // Teammate kills and frag kills use the same elimination path.
+  g = Game();
+  g.bots = {{5, 16}, {3, 13}};
+  g.bots[1].terrorist = true;
+  g.planted = true;
+  g.damageBot(0, 200, 1);
+  assert(g.bots[1].frags == 1);
+  g.tick(.02);
+  assert(g.ended && g.won);
+  // A dead human can watch living teammates; death alone no longer ends a
+  // round.
+  g = Game();
+  g.hp = 0;
+  g.bots = {{3, 3}, {27, 26}};
+  g.bots[0].terrorist = true;
+  for (auto &b : g.bots)
+    b.blind = 1000;
+  g.tick(.02);
+  assert(!g.ended && g.spectating() == 0);
+  assert(g.eye().x == 3 && g.eye().y == 3);
+  g = Game();
+  g.hp = 0;
+  g.bots = {{3, 3}};
+  g.bots[0].blind = 1000;
+  g.planted = true;
+  g.bombX = 27;
+  g.bombY = 5;
+  g.tick(.02);
+  assert(!g.ended); // CT must still defuse when all Ts are dead after a plant.
+  // Continuous-fire cadence is fixed-step and frame-rate independent.
+  for (int gun : {1, 2}) {
+    g = Game();
+    g.weapon = gun;
+    g.owned[gun] = true;
+    g.bots = {{3, 3}};
+    g.bots[0].blind = 1000;
+    for (int i = 0; i < 240; i++) {
+      g.tick(1. / 240);
+      g.trigger(true, i == 0);
+    }
+    int fired = weapons[gun].capacity - g.ammo();
+    assert(fired == (gun == 1 ? 16 : 20));
+  }
+  g = Game();
+  g.bots = {{3, 3}};
+  g.bots[0].blind = 1000;
+  for (int i = 0; i < 240; i++) {
+    g.tick(1. / 240);
+    g.trigger(true, i == 0);
+  }
+  assert(g.ammo() == 11); // Pistol is semi-auto.
+  g = Game();
+  g.weapon = 3;
+  g.owned[3] = true;
+  g.bots = {{3, 3}};
+  g.bots[0].blind = 1000;
+  g.trigger(true, true);
+  assert(g.ammo() == 4 && g.boltCycle > 0);
+  g.startReload();
+  g.switchWeapon(0);
+  assert(g.weapon == 3 && g.reload == 0);
+  simulate(g, 1.25);
+  g.trigger(true, false);
+  assert(g.ammo() == 4);
+  g.trigger(true, true);
+  assert(g.ammo() == 3);
+  // Friendly bullets never damage allies, but allies block the shot.
+  g = Game();
+  g.bots = {{4, 16}, {5, 16}};
+  g.bots[0].terrorist = true;
+  g.fire();
+  assert(g.bots[0].hp == 100 && g.bots[1].hp == 100 && g.kills == 0);
+  // Both teams can engage bots; blinded opponents do not know hidden positions.
+  g = Game();
+  g.hp = 0;
+  g.bots = {{5, 16}, {3, 16}};
+  g.bots[1].terrorist = true;
+  g.bots[0].facing = PI;
+  g.bots[1].facing = 0;
+  simulate(g, 3);
+  assert(g.bots[0].hp < 100 || g.bots[1].hp < 100);
+  g = Game();
+  g.bots = {{6, 8}, {13, 8}};
+  g.bots[1].terrorist = true;
+  g.bots[0].facing = 0;
+  g.bots[1].blind = 1000;
+  g.hp = 0;
+  g.tick(.02);
+  assert(!g.bots[0].knows);
+  // 3D viewmodel draws genuine depth-tested triangles for every gun, including
+  // a moving magazine and bolt. It must preserve the world's depth buffer.
+  game = Game();
+  game.bots.clear();
+  drawWorld();
+  auto worldDepth = zbuffer;
+  auto worldPixels = pixels;
+  for (int gun = 0; gun < 5; gun++) {
+    game.weapon = gun;
+    pixels = worldPixels;
+    drawViewmodel();
+    assert(zbuffer == worldDepth && pixels != worldPixels);
+    auto held = pixels;
+    game.reload = weapons[gun].reload * .5;
+    pixels = worldPixels;
+    drawViewmodel();
+    assert(pixels != held);
+    game.reload = 0;
+  }
+  // Full autonomous rounds must resolve from both roles without movement
+  // through walls or stopping when the human is dead.
+  for (int round = 0; round < 2; round++) {
+    g = Game();
+    if (round)
+      g.reset();
+    g.hp = 0;
+    for (int i = 0; i < 40000 && !g.ended; i++)
+      g.tick(1. / 240);
+    assert(g.ended);
+    for (auto &b : g.bots)
+      assert(!arena.solid(b.x, b.y, .19));
+  }
   // Render actual triangles and verify depth and perspective changes.
   game = Game();
   game.buy(1);
@@ -221,6 +367,10 @@ int main(int argc, char **argv) {
     }
   }
   puts("PASS: map connectivity, collision, economy, guns, headshots, cover, "
-       "finite reloads, plant/defuse, timers, round accounting, smoke, flash, "
-       "frag, AI navigation/hearing, 3D rendering, depth buffer, camera");
+       "finite reloads, plant/defuse, frozen round timer, instant T "
+       "elimination wins, "
+       "five AI per team, teammate combat, spectating, automatic cadence, bolt "
+       "cycle, utilities, full autonomous rounds, 3D viewmodels, depth buffer, "
+       "camera");
+  return 0;
 }
