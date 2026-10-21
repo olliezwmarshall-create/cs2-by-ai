@@ -169,11 +169,22 @@ struct Blast {
   Vec p;
   double time;
 };
+struct Particle {
+  Vec p, v;
+  double life;
+  uint32_t color;
+};
+struct Impact {
+  Vec p;
+  double life;
+};
 struct Game {
   double x = 3, y = 16, a = 0, pitch = 0, shot = 0, muzzle = 0, reload = 0,
          time = 0, hurt = 0, hit = 0, recoil = 0, steps = 0, flash = 0,
          clock = 115, plantProgress = 0, defuseProgress = 0, bombClock = 40,
-         bombX = 0, bombY = 0, beep = 0, boltCycle = 0;
+         bombX = 0, bombY = 0, beep = 0, boltCycle = 0, freeze = 0, vx = 0,
+         vy = 0, stance = 0, jumpHeight = 0, jumpVelocity = 0;
+  bool sprinting = false;
   int hp = 100, armor = 0, kills = 0, round = 0, weapon = 0, money = 3200,
       wins = 0, losses = 0, spectator = 0;
   bool won = false, ended = false, attacker = true, planted = false,
@@ -191,6 +202,8 @@ struct Game {
   std::vector<Grenade> grenades;
   std::vector<Cloud> smokes;
   std::vector<Blast> blasts;
+  std::vector<Particle> particles;
+  std::vector<Impact> impacts;
   std::vector<std::string> feed;
   Game() { reset(); }
   int &ammo() { return magazines[weapon]; }
@@ -208,6 +221,10 @@ struct Game {
     a = attacker ? 0 : PI;
     pitch = shot = muzzle = reload = time = hurt = hit = recoil = steps =
         flash = plantProgress = defuseProgress = beep = boltCycle = 0;
+    freeze = vx = vy = stance = jumpHeight = jumpVelocity = 0;
+    sprinting = false;
+    particles.clear();
+    impacts.clear();
     spectator = 0;
     feed.clear();
     hp = 100;
@@ -298,7 +315,7 @@ struct Game {
     return clearLine(ox, oy, tx, ty) && !obscured(ox, oy, tx, ty);
   }
   void move(double dx, double dy) {
-    if (ended || hp <= 0)
+    if (ended || hp <= 0 || freeze > 0)
       return;
     double ox = x, oy = y;
     int n = std::max(1, int(hypot(dx, dy) / .08) + 1);
@@ -317,6 +334,34 @@ struct Game {
       steps = 0;
       sounds.push_back(Step);
     }
+  }
+  void locomotion(double dt, double forward, double side, bool sprint,
+                  bool crouch) {
+    if (ended || hp <= 0 || freeze > 0) {
+      vx = vy = 0;
+      walking = false;
+      return;
+    }
+    stance += std::clamp((crouch ? 1. : 0.) - stance, -dt * 6, dt * 6);
+    sprinting = sprint && !ads && !crouch;
+    double speed = crouch ? 1.25 : sprinting ? 3.7 : ads ? 1.45 : 2.6;
+    double n = std::max(1., hypot(forward, side));
+    forward *= speed / n;
+    side *= speed / n;
+    double tx = cos(a) * forward - sin(a) * side,
+           ty = sin(a) * forward + cos(a) * side;
+    double acceleration = (forward != 0 || side != 0) ? 18 : 25;
+    auto approach = [&](double value, double target) {
+      return value +
+             std::clamp(target - value, -acceleration * dt, acceleration * dt);
+    };
+    vx = approach(vx, tx);
+    vy = approach(vy, ty);
+    move(vx * dt, vy * dt);
+  }
+  void jump() {
+    if (hp > 0 && !ended && freeze <= 0 && jumpHeight <= 0 && stance < .2)
+      jumpVelocity = 3.5;
   }
   bool buyAllowed() const {
     return hp > 0 && time < 22 && dist(x, y, attacker ? 3 : 28, 16) < 4 &&
@@ -376,8 +421,8 @@ struct Game {
       }
   }
   void fire() {
-    if (hp <= 0 || ended || buyOpen || shot > .000001 || boltCycle > 0 ||
-        reload > 0 || usingObjective)
+    if (hp <= 0 || ended || freeze > 0 || buyOpen || shot > .000001 ||
+        boltCycle > 0 || reload > 0 || usingObjective)
       return;
     if (ammo() <= 0) {
       shot = .25;
@@ -392,11 +437,15 @@ struct Game {
     recoil = std::min(2., recoil + .65);
     sounds.push_back(Rifle);
     hear(x, y, 24);
-    double spread =
-        gun().spread * (walking ? 3 : 1) * (ads ? .4 : 1) * (1 + recoil * .4);
+    double spread = gun().spread *
+                    (jumpHeight > .03 ? 5
+                     : walking        ? 3
+                     : stance > .5    ? .65
+                                      : 1) *
+                    (ads ? .4 : 1) * (1 + recoil * .4);
     Vec dir =
         direction(a + (rng() - .5) * spread, pitch + (rng() - .5) * spread);
-    Vec origin = {x, y, 1.6};
+    Vec origin = {x, y, 1.6 - stance * .5 + jumpHeight};
     double nearest = geometry(origin, dir, gun().range);
     Bot *target = nullptr;
     bool head = false;
@@ -415,6 +464,22 @@ struct Game {
       }
     }
     tracers.push_back({origin, origin + dir * nearest, .09, false});
+    particles.push_back({origin + Vec{-sin(a) * .2, cos(a) * .2, -.12},
+                         {-sin(a) * 1.7, cos(a) * 1.7, 1.1},
+                         1.,
+                         0xC7A65C});
+    if (!target) {
+      Vec at = origin + dir * std::max(0., nearest - .025);
+      impacts.push_back({at, 20});
+      if (impacts.size() > 64)
+        impacts.erase(impacts.begin());
+      for (int i = 0; i < 4; i++)
+        particles.push_back(
+            {at,
+             {(rng() - .5) * 1.5, (rng() - .5) * 1.5, rng() * 1.4},
+             .25,
+             0xFFC983});
+    }
     if (target && target->terrorist != attacker) {
       damageBot(int(target - bots.data()), gun().damage * (head ? 3 : 1), -1);
       hit = .2;
@@ -488,7 +553,8 @@ struct Game {
   }
   Vec eye() const {
     int i = spectating();
-    return i >= 0 ? Vec{bots[i].x, bots[i].y, 1.6} : Vec{x, y, 1.6};
+    return i >= 0 ? Vec{bots[i].x, bots[i].y, 1.6}
+                  : Vec{x, y, 1.6 - stance * .5 + jumpHeight};
   }
   double viewAngle() const {
     int i = spectating();
@@ -546,6 +612,37 @@ struct Game {
   void tick(double dt) {
     if (ended)
       return;
+    if (freeze > 0) {
+      freeze = std::max(0., freeze - dt);
+      return;
+    }
+    if (jumpVelocity != 0 || jumpHeight > 0) {
+      jumpVelocity -= 9.8 * dt;
+      jumpHeight += jumpVelocity * dt;
+      if (jumpHeight <= 0) {
+        jumpHeight = jumpVelocity = 0;
+        sounds.push_back(Step);
+      }
+    }
+    for (auto &p : particles) {
+      p.life -= dt;
+      p.v.z -= 9.8 * dt;
+      p.p = p.p + p.v * dt;
+      if (p.p.z < .03) {
+        p.p.z = .03;
+        p.v.z = std::abs(p.v.z) * .3;
+        p.v.x *= .8;
+        p.v.y *= .8;
+      }
+    }
+    particles.erase(std::remove_if(particles.begin(), particles.end(),
+                                   [](auto p) { return p.life <= 0; }),
+                    particles.end());
+    for (auto &p : impacts)
+      p.life -= dt;
+    impacts.erase(std::remove_if(impacts.begin(), impacts.end(),
+                                 [](auto p) { return p.life <= 0; }),
+                  impacts.end());
     time += dt;
     if (!planted)
       clock = std::max(0., clock - dt);

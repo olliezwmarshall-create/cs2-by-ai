@@ -8,9 +8,10 @@ struct WeaponModel {
   WeaponModel() {
     double phase = game.reload > 0 ? 1 - game.reload / game.gun().reload : 0;
     double anim = sin(phase * PI);
-    yaw = -anim * .35 + (moving ? sin(game.time * 5.5) * .015 : 0);
+    yaw = -anim * .35 + (game.sprinting ? .13 : 0) +
+          (moving ? sin(game.time * 5.5) * .015 : 0);
     roll = anim * .7;
-    pitch = anim * .35 + game.recoil * .07;
+    pitch = anim * .35 + game.recoil * .07 - (game.sprinting ? .16 : 0);
     offset = {.22 - game.recoil * .045, aiming ? 0. : .22,
               aiming ? -.15 : -.32};
     offset.z -= anim * .18;
@@ -60,6 +61,8 @@ void drawViewmodel() {
   std::swap(zbuffer, modelDepth);
   std::fill(zbuffer.begin(), zbuffer.end(), 0);
   projectionOverride = 630;
+  int previousMaterial = activeMaterial;
+  activeMaterial = 4;
   WeaponModel m;
   unsigned steel = 0x414D55, black = 0x202A30, skin = 0xAE8E70,
            glove = 0x36443A;
@@ -135,5 +138,6 @@ void drawViewmodel() {
            {tip - .03, 0, .005}, 0xFFE5A1);
   }
   projectionOverride = 0;
+  activeMaterial = previousMaterial;
   std::swap(zbuffer, modelDepth);
 }

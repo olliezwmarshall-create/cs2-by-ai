@@ -1,97 +1,106 @@
-# Breach: Dockyard — Team Assault
+# Breach / Dockyard
 
-An original offline C++17 tactical shooter for 64-bit Windows. Buildings, cover, characters, projectiles, **first-person weapons, magazines, hands and scopes are 3D meshes**, rendered with perspective projection, near clipping and depth testing. All geometry and sound are generated in code; no installer or extra assets are required.
+An original offline tactical shooter for 64-bit Windows, written in C++17. Start, choose your team, buy equipment and adjust settings through **clickable mouse menus**. Both sides have five AI players, and you join your chosen side as an additional player.
 
-[Download Breach.zip](https://github.com/olliezwmarshall-create/cs2-by-ai/raw/refs/heads/main/dist/Breach.zip), extract the folder and run **Breach.exe**. Click to capture the mouse. Escape releases it and pauses; Escape again quits.
+[Download Breach.zip](https://github.com/olliezwmarshall-create/cs2-by-ai/raw/refs/heads/main/dist/Breach.zip), extract it and run **Breach.exe**. Click **Play / T Side** or **Play / CT Side**, buy a weapon, then click **Back to Game**. The game captures the mouse for aiming. Escape opens the pause menu and releases your cursor. Use the menu's Quit button to exit.
 
-## Teams and round rules
+## New presentation and controls
 
-**T and CT each have five AI players. You join your current side as an additional player.** This means six versus five while you are alive, rather than replacing one of the five bots. Your side alternates between rounds.
+- Main menu, pause menu, weapon/equipment shop, settings, utility selector, team roster and round-result screen have mouse hit areas and hover feedback. Number keys remain optional shortcuts for equipping owned guns; purchases use clickable cards.
+- Scroll the wheel to cycle owned guns. In the utility selector it cycles grenades; in the shop it switches categories. While spectating, it changes teammates.
+- Hold the middle mouse button, point at a grenade card and release to select it. You can also scroll or click a card. G throws the selected grenade.
+- Settings have draggable sliders for sensitivity, volume and field of view, plus shadows, invert-Y and borderless fullscreen toggles. Save & Back or Escape saves them to `%LOCALAPPDATA%\Breach\settings.cfg` when that location is writable.
+- Rendering includes perspective-correct procedural materials, textured masonry, paving and wood, directional lighting, baked floor shadows and ambient contact shading, facade windows, muzzle illumination, bullet marks and ejected casings.
+- The 3D weapon models use smoother aim transitions, idle breathing, sprint lowering, recoil, reload tilting and moving magazines/bolts. Movement now has acceleration, stopping friction, crouching and a grounded jump.
 
-- **T:** Eliminate every CT for an immediate win, **whether or not the bomb is planted**, or plant and defend the bomb until it detonates.
-- **CT:** Eliminate every T before a plant, survive the pre-plant timer, or defuse the planted bomb. If every T dies after a plant, CT must still defuse or survive no further round timer: only the bomb countdown matters.
-- **Plant:** Hold F for three seconds inside a yellow A or B site. **Defuse:** Hold F for five seconds within 1.8 units of the planted device. Moving, changing weapons, reloading, throwing utility or releasing F interrupts the interaction.
-- **Timers:** The round clock starts at 115 seconds and **freezes at planting**. The bomb then has its own 40-second countdown. The HUD marks the round clock `FROZEN` and displays the bomb countdown separately.
-- **After death:** Your AI teammates keep fighting. You spectate a living teammate; V cycles teammates. The round resolves using team elimination and bomb rules rather than your death alone.
-- Enter starts the next round after a result. Wins and losses accumulate without a fixed match length.
+All geometry and audio are generated in code. There are no downloaded game assets or runtime installers.
 
-The 32×32 map has two bomb courtyards, middle connectors, flanking routes, buildings, overhead structures and crates. Friendly bots have green overhead markers and blue minimap dots. Friendly bullet and grenade damage is disabled; teammates still block player bullets.
-
-## Controls
+## Mouse and keyboard controls
 
 | Input | Action |
 | --- | --- |
+| Mouse movement | Look / aim |
+| Left click | Fire; hold for carbine or SMG |
+| Right click (hold) | Aim / scope |
+| Wheel | Cycle owned guns; menus use it for categories/selection |
+| Middle button (hold/release) | Open / choose utility |
+| Mouse side button 1 | Reload |
+| Mouse side button 2 (hold) | Plant / defuse in range |
 | WASD | Move / strafe |
-| Mouse | Turn / look up and down |
-| Left click / Space | Fire; hold for automatic weapons |
-| Right click (hold) | Aim; scoped weapons zoom further |
 | Shift | Sprint |
-| R | Reload from finite reserve ammunition |
-| 1 / 2 / 3 / 4 / 5 | Pistol / carbine / SMG / bolt sniper / scout DMR, if owned |
-| F (hold) | Plant / defuse in range; blocks firing while held |
-| Q / G | Cycle utility / throw utility |
-| B | Buy menu in spawn, first 22 seconds |
-| Tab | Team roster, AI state, kills and your status |
-| V | Cycle living teammates while spectating |
-| Arrow Left / Right | Alternative turning |
-| Escape | Release mouse / pause; again to quit |
-| Enter | Next round after a result |
+| Control | Crouch |
+| Space | Jump |
+| R | Reload |
+| F (hold) | Plant / defuse in range |
+| G | Throw selected grenade |
+| Q | Quick-switch to previous weapon |
+| 1–5 | Pistol / carbine / SMG / bolt sniper / DMR, if owned |
+| B | Open the clickable armory |
+| Tab | Open clickable roster screen |
+| V | Next teammate while spectating |
+| Escape | Pause / go back; does not immediately quit |
+| Enter | Optional next-round shortcut on the result screen |
 
-## Weapons and buying
+Movement uses WASD as in a standard desktop shooter. Team selection, shopping, settings, utility selection, resuming, starting the next round and quitting are available with the mouse.
 
-The carbine and SMG fire continuously while held, using a fixed 240 Hz gameplay step. Cadence does not depend on rendering speed. The pistol, bolt sniper and DMR require a fresh trigger press per shot.
+## Round rules
 
-| Weapon | Buy key* | Price | Magazine | Body damage | Nominal firing interval |
-| --- | --- | --- | --- | --- | --- |
-| Service pistol | Free | $0 | 12 | 34 | 0.22 s, semi-auto |
-| Auto carbine | 1 | $2400 | 30 | 35 | 0.065 s, automatic (~923 RPM) |
-| Rapid SMG | 2 | $1200 | 32 | 24 | 0.05 s, automatic (1200 RPM) |
-| Bolt sniper | 3 | $3500 | 5 | 110 | 1.2 s, bolt-action |
-| Scout DMR | 6 | $2800 | 10 | 72 | 0.28 s, semi-auto |
+The 32×32 Dockyard has two yellow bomb-site courtyards, connected middle and flanking routes, buildings and crate cover.
 
-*Buy keys apply only with the B menu open; they differ from weapon-selection keys. In the menu, 4 buys armor ($650), and 5 refills utility ($300, maximum two of each).
+- **T wins immediately when every CT is eliminated, planted or not.** T can also plant and defend the bomb until detonation.
+- **CT wins** by eliminating every T before a plant, surviving the pre-plant clock, or defusing the bomb. If every T dies after planting, surviving CTs must still defuse.
+- Hold F or mouse side button 2 for **three seconds** in a site to plant, or **five seconds** within 1.8 units of a planted bomb to defuse. Movement, reloading, switching weapons, throwing utility or releasing the button interrupts the action.
+- Each round starts with an **eight-second freeze/buy phase**. Movement, firing and bots wait while you shop. The 115-second round clock starts after that phase.
+- Planting freezes the round clock; the bomb starts a separate **40-second countdown**. The HUD displays that bomb countdown in place of the round clock.
+- Death does not end the round while teammates remain. You spectate a living teammate while the match continues.
+- Your role alternates after each round. Click Next Round on the result screen. There is no fixed match length.
 
-Headshots deal triple damage. Moving and sustained fire widen spread; aiming narrows it. Each weapon keeps separate magazine and reserve counts. The sniper has a visible 3D bolt cycle and bolt sound; switching and reloading are blocked during its bolt cycle. Reloads move the 3D magazine and tilt the entire weapon. Switching normally cancels a reload.
+Pause, settings and the roster pause this offline match. Shopping and utility selection leave the match running, so use cover. Losing window focus opens the pause menu.
 
-You start with a pistol, $3200, and one of each grenade. Your kills award $300, round wins $3000, and losses $1900, capped at $16000. Wins preserve bought guns and armor; losses remove them. Magazines, reserves and one of each grenade refresh next round. Buying does not pause the match.
+## Weapons, ammo and money
 
-## Team AI
+| Weapon | Cost | Magazine | Body damage | Fire behavior |
+| --- | --- | --- | --- | --- |
+| Service pistol | Free | 12 | 34 | Semi-auto, 0.22 s interval |
+| Auto carbine | $2400 | 30 | 35 | Automatic, 0.065 s (~923 RPM) |
+| Rapid SMG | $1200 | 32 | 24 | Automatic, 0.05 s (1200 RPM) |
+| Bolt sniper | $3500 | 5 | 110 | Bolt-action, 1.2 s interval |
+| Scout DMR | $2800 | 10 | 72 | Scoped semi-auto, 0.28 s interval |
 
-Both sides use the same combat and perception system. Bots have entry, support, flanking and sniper roles. They:
+The armory has weapon cards with prices, magazine sizes, damage bars and silhouettes. Owned guns can be equipped without repurchasing. Equipment offers armor for $650 and a utility refill for $300. Purchases require spawn proximity and the first 22 seconds of active round time; freeze time also permits purchases.
 
-- Pick visible opposing bots or the human, react after a short delay, share sightings with teammates, and investigate heard gunfire.
-- Navigate around geometry, spread apart in lanes, strafe, fire controlled bursts, reload, and seek cover when injured or reloading.
-- Wait for clear fire lanes instead of shooting through allies; incoming damage suppresses accuracy.
-- Have entry bots throw a flash and supports throw smoke during engagements.
-- Assign a T planter with escorts and flank support. After planting, Ts guard nearby positions.
-- Assign the nearest living CT to defuse while others cover. If that CT dies, another takes over.
+You start with $3200, a pistol and one of each grenade. Your kills award $300, round wins $3000 and losses $1900, capped at $16000. Wins preserve bought weapons and armor; losses remove them. Each round refreshes magazines, finite ammo reserves and one of each utility.
 
-Sight checks are staggered rather than repeated at physics frequency; shots recheck line of sight. Hidden positions are not shared as live target data. AI accuracy is probabilistic, and teamwork is simplified for this prototype.
+Headshots deal triple damage. Moving and jumping reduce accuracy; aiming and crouching improve it. Each gun retains its own ammo. Switching cancels a reload; the bolt sniper blocks switching and reloading during its bolt cycle. Friendly damage is disabled, but teammates can block player bullets. Your own frag can hurt you.
 
-## Utilities and feedback
+## Bots and utilities
 
-- **Frag:** Bouncing projectile, 1.25-second fuse, blast damage through clear physical lines. Smoke does not block damage. Your own frag can hurt you.
-- **Smoke:** A 12-second cloud blocks AI sight. Bullets still pass through it.
-- **Flash:** Blinds bots in line of sight for four seconds and whites out your screen if you face a nearby blast. Can affect teammates.
+Bots on both sides engage opposing bots and the human. Entry, support, flanker and sniper roles share sightings, investigate gunfire, navigate around cover, separate in narrow lanes, reload, strafe, fire controlled bursts and seek cover when injured or reloading. They wait for clear friendly fire lanes, react after a short delay and lose accuracy under damage suppression.
 
-The kill feed, live T/CT counts, team roster, friendly markers, bomb beeps, mixed gunfire, footsteps, reload sounds, recoil, tracers, muzzle flashes, walking sway and damage feedback help track combat. If no audio device exists, play continues silently.
+T assigns a planter and escort/flanking roles, then guards the planted bomb. CT assigns the nearest living defuser with others covering; another takes over if that bot dies. Entry bots can flash and supports can smoke during engagements. Perception is staggered for performance and shots recheck visibility.
 
-## Build and validate
+- **Frag:** Bounces and explodes after 1.25 seconds. Physical cover blocks damage; smoke does not.
+- **Smoke:** Creates a 12-second cloud that blocks AI sight. Bullets still pass through.
+- **Flash:** Blinds bots in line of sight for four seconds; can affect teammates and white out your screen when facing a nearby blast.
+
+The interface shows live team counts, money, objectives, selected equipment, kill feed, friendly markers, roster and spectating status. Gunfire, footsteps, reloads, explosions and bomb beeps use mixed procedural audio. A missing audio device results in silent play.
+
+## Build and validation
 
 ```sh
-# Windows cross-build with MinGW-w64
+# Cross-compile the Windows executable using MinGW-w64
 ./build.sh
-# For a locally extracted compiler, set CXX to x86_64-w64-mingw32-g++-posix.
+# For an extracted compiler, set CXX to its x86_64-w64-mingw32-g++-posix executable.
 
-# Portable gameplay and renderer tests
+# Portable gameplay, renderer and mouse-menu logic checks
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic main.cpp -o /tmp/breach-tests
 /tmp/breach-tests /tmp/breach.ppm
 
-# Memory and undefined-behavior validation
+# Memory and undefined-behavior checks
 g++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer main.cpp -o /tmp/breach-sanitized
 /tmp/breach-sanitized
 ```
 
-Checks cover map connectivity and collision, economy and guns, automatic cadence, semi-auto trigger behavior, bolt-cycle locking, head/body hits, finite reloads, team counts, teammate combat, friendly bullet blocking, instant elimination results, independent bomb/round clocks, planting and defusing, death/spectating, utilities, AI navigation, full autonomous rounds on both sides, 3D viewmodels/reload poses, depth preservation, world occlusion and camera changes. Optional PPM output captures a current rendered scene.
+Checks cover mouse menu transitions, clickable purchases and disabled cards, scroll selection, persistent settings, freeze time, movement/crouch/jump, team combat and spectating, weapons and fire cadence, bomb rules and timers, autonomous rounds from both roles, utility, map navigation, 3D viewmodel poses, renderer depth and camera behavior. Optional PPM output captures a current software-rendered scene.
 
-The Windows executable is cross-compiled here; Windows mouse input, audio playback and window presentation still require a Windows play test. The visuals remain simple low-poly art. This is an original single-player prototype without networking or licensed Counter-Strike content.
+The executable is cross-compiled here. Windows input, font rendering, fullscreen behavior and audio playback still need a Windows play test. This remains a stylized low-poly single-player prototype with an original software renderer; it does not include networking or licensed Counter-Strike content.

@@ -319,6 +319,120 @@ int main(int argc, char **argv) {
     for (auto &b : g.bots)
       assert(!arena.solid(b.x, b.y, .19));
   }
+  // Mouse-driven menu flow: start, purchase/equip, categories, pause,
+  // settings, utility and result screens. Disabled cards cannot spend money.
+  Interface menu;
+  g = Game();
+  auto clickAction = [&](int id) {
+    bool found = false;
+    for (auto b : menu.buttons(g))
+      if (b.action == id) {
+        assert(b.enabled);
+        menu.click(b.r.x + b.r.w / 2, b.r.y + b.r.h / 2, g);
+        found = true;
+        break;
+      }
+    assert(found);
+  };
+  clickAction(1);
+  assert(g.attacker && g.round == 1 && g.freeze == 8 &&
+         menu.page == ScreenPage::Buy && !menu.capturesMouse() &&
+         menu.simulates());
+  clickAction(101);
+  assert(g.owned[1] && g.weapon == 1 && g.money == 800);
+  int balance = g.money;
+  for (auto b : menu.buttons(g))
+    if (b.action == 103) {
+      assert(!b.enabled);
+      menu.click(b.r.x + 10, b.r.y + 10, g);
+    }
+  assert(g.money == balance && !g.owned[3]);
+  menu.wheel(1, g);
+  assert(menu.buyTab == 1);
+  clickAction(110);
+  assert(g.armor == 100 && g.money == 150);
+  clickAction(5);
+  assert(menu.capturesMouse());
+  menu.wheel(1, g);
+  assert(g.weapon == 0);
+  menu.wheel(-1, g);
+  assert(g.weapon == 1);
+  menu.wheel(-1, g);
+  assert(g.weapon == 0);
+  menu.escape(g);
+  assert(menu.page == ScreenPage::Pause && !menu.simulates() && !menu.quit);
+  clickAction(3);
+  assert(menu.page == ScreenPage::Settings);
+  assert(menu.slider(795, 200) && menu.prefs.sensitivity == 3);
+  assert(menu.slider(330, 267) && menu.prefs.volume == 0);
+  clickAction(30);
+  assert(!menu.prefs.shadows);
+  clickAction(32);
+  assert(menu.prefs.fullscreen);
+  clickAction(9);
+  assert(menu.page == ScreenPage::Pause);
+  assert(menu.prefs.save("/tmp/breach-test-settings.cfg"));
+  Preferences loaded;
+  loaded.load("/tmp/breach-test-settings.cfg");
+  assert(loaded.sensitivity == 3 && loaded.volume == 0 && loaded.fullscreen &&
+         !loaded.shadows);
+  clickAction(5);
+  menu.open(ScreenPage::Utility, g);
+  g.utilities = {0, 1, 1};
+  g.utility = 1;
+  menu.wheel(-1, g);
+  assert(g.utility == 2);
+  clickAction(202);
+  assert(menu.page == ScreenPage::Play && g.utility == 2);
+  g.finish(true, "TEST ROUND");
+  menu.update(.01, g);
+  assert(menu.page == ScreenPage::Result);
+  clickAction(10);
+  assert(!g.attacker && g.freeze == 8 && menu.page == ScreenPage::Buy);
+  menu.open(ScreenPage::Home, g);
+  menu.escape(g);
+  assert(!menu.quit);
+  clickAction(2);
+  assert(!g.attacker && g.round == 1);
+  // Freeze, acceleration, friction, crouch eye height and jumping are gameplay
+  // behavior rather than purely visual changes.
+  g = Game();
+  g.freeze = 1;
+  double clock = g.clock;
+  g.fire();
+  assert(g.ammo() == 12);
+  simulate(g, .5);
+  assert(g.clock == clock);
+  simulate(g, .6);
+  assert(g.freeze == 0 && g.clock < clock);
+  g = Game();
+  g.locomotion(.01, 1, 0, false, false);
+  assert(g.vx > 0 && g.vx < 2.6);
+  for (int i = 0; i < 30; i++)
+    g.locomotion(.01, 0, 0, false, true);
+  assert(g.vx == 0 && g.stance > .9 && g.eye().z < 1.2);
+  g.stance = 0;
+  g.jump();
+  g.tick(.1);
+  assert(g.jumpHeight > 0 && g.eye().z > 1.6);
+  simulate(g, 1);
+  assert(g.jumpHeight == 0);
+  // All interface layouts emit visible labels and buttons, independent of
+  // Win32 text rendering; the same hit areas drive mouse events.
+  for (auto page : {ScreenPage::Home, ScreenPage::Pause, ScreenPage::Buy,
+                    ScreenPage::Settings, ScreenPage::Utility,
+                    ScreenPage::Result, ScreenPage::Roster}) {
+    ui.page = page;
+    game = Game();
+    render();
+    drawInterface();
+    assert(!interfaceText.empty());
+    for (auto b : ui.buttons(game)) {
+      assert(b.r.x >= 0 && b.r.y >= 0 && b.r.x + b.r.w <= W &&
+             b.r.y + b.r.h <= H);
+    }
+  }
+  ui = Interface();
   // Render actual triangles and verify depth and perspective changes.
   game = Game();
   game.buy(1);
@@ -371,6 +485,7 @@ int main(int argc, char **argv) {
        "elimination wins, "
        "five AI per team, teammate combat, spectating, automatic cadence, bolt "
        "cycle, utilities, full autonomous rounds, 3D viewmodels, depth buffer, "
-       "camera");
+       "camera, mouse menus, scroll switching, settings persistence, movement, "
+       "crouch and jump");
   return 0;
 }
