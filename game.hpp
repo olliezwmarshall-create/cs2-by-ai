@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 constexpr double PI = 3.141592653589793;
-constexpr int W = 960, H = 600, MAP = 32;
+constexpr int W = 960, H = 600, MAP = 64;
 struct Vec {
   double x = 0, y = 0, z = 0;
   Vec operator+(Vec b) const { return {x + b.x, y + b.y, z + b.z}; }
@@ -19,6 +19,12 @@ double dist(double x, double y, double xx, double yy) {
   return std::hypot(x - xx, y - yy);
 }
 double wrap(double a) { return atan2(sin(a), cos(a)); }
+constexpr Vec HOME_T{5, 32, 0}, HOME_CT{59, 32, 0}, SITE_A{54, 12, 0},
+    SITE_B{54, 52, 0};
+constexpr int WEAPON_COUNT = 16;
+bool secondaryGun(int gun) { return gun == 0 || (gun >= 5 && gun <= 7); }
+bool scopedGun(int gun) { return gun == 3 || gun == 4 || gun == 14; }
+bool boltGun(int gun) { return gun == 3 || gun == 14; }
 struct Box {
   double x, y, z, w, d, h;
   uint32_t color;
@@ -34,30 +40,34 @@ struct Arena {
         if (!x || !y || x == MAP - 1 || y == MAP - 1)
           cells[y][x] = '#';
     }
-    // Two long routes, central connector, and open objective courtyards.
-    for (int y = 5; y <= 24; y++)
-      for (int x = 7; x <= 11; x++)
-        if (y < 13 || y > 17)
+    auto building = [&](int x0, int y0, int x1, int y1) {
+      for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
           cells[y][x] = '#';
-    for (int y = 6; y <= 25; y++)
-      for (int x = 19; x <= 23; x++)
-        if (y < 14 || y > 18)
-          cells[y][x] = '#';
-    for (int x = 12; x < 19; x++)
-      for (int y = 9; y < 12; y++)
-        cells[y][x] = '#';
-    for (int x = 12; x < 18; x++)
-      for (int y = 22; y < 25; y++)
-        cells[y][x] = '#';
-    props = {{4, 8, 0, 1.3, 1.3, 1.25, 0x8F714E},
-             {4, 15, 0, 1.3, 2, 1.25, 0x8F714E},
-             {13, 15, 0, 1.4, 1.4, 1.1, 0x96794E},
-             {16, 17, 0, 1.4, 1.4, 1.7, 0x88704F},
-             {26, 10, 0, 1.5, 2, 1.4, 0x687878},
-             {26, 19, 0, 1.5, 2, 1.4, 0x687878},
-             {14, 4, 0, 2, 1, 1.2, 0x937B53},
-             {17, 28, 0, 1.7, 1, 1.2, 0x937B53},
-             {24.5, 27.5, 0, 1, 1, 1.1, 0x597269}};
+    };
+    building(13, 8, 21, 24);
+    building(13, 40, 21, 55);
+    building(31, 9, 38, 22);
+    building(31, 42, 38, 55);
+    building(26, 29, 36, 35);
+    building(44, 22, 49, 28);
+    building(44, 36, 49, 43);
+    building(8, 29, 10, 35);
+    building(52, 28, 54, 36);
+    props = {{24, 17, 0, 1.5, 2, 1.4, 0x91724F},
+             {24, 46, 0, 1.5, 2, 1.4, 0x91724F},
+             {40, 15, 0, 2, 1.5, 1.3, 0x6B8286},
+             {41, 48, 0, 2, 1.5, 1.3, 0x6B8286},
+             {55, 8, 0, 1.4, 1.4, 1.1, 0x93744A},
+             {56, 55, 0, 1.4, 1.4, 1.1, 0x93744A},
+             {17, 28, 0, 2.5, 1.5, 1.2, 0x93744A},
+             {19, 36, 0, 2.5, 1.5, 1.2, 0x93744A},
+             {39, 31, 0, 1.4, 1.4, 1.7, 0x526E78},
+             {39, 34, 0, 1.4, 1.4, 1.7, 0x526E78},
+             {25, 52, 0, 1.2, 2, 1.3, 0x8B744B},
+             {26, 6, 0, 1.2, 2, 1.3, 0x8B744B},
+             {4, 20, 0, 1.2, 1.2, 1.1, 0x486873},
+             {5, 43, 0, 1.2, 1.2, 1.1, 0x486873}};
     for (int y = 0; y < MAP; y++)
       for (int x = 0; x < MAP; x++)
         if (cells[y][x] == '#')
@@ -129,12 +139,23 @@ struct Weapon {
   double delay, reload, spread, range;
   bool automatic = false;
 };
-const std::array<Weapon, 5> weapons = {
-    {{"SERVICE PISTOL", 12, 34, 0, .22, 1.3, .008, 24, false},
-     {"AUTO CARBINE", 30, 35, 2400, .065, 2.1, .012, 38, true},
-     {"RAPID SMG", 32, 24, 1200, .05, 1.65, .023, 20, true},
-     {"BOLT SNIPER", 5, 110, 3500, 1.2, 2.6, .001, 64, false},
-     {"SCOUT DMR", 10, 72, 2800, .28, 2.2, .004, 55, false}}};
+const std::array<Weapon, WEAPON_COUNT> weapons = {
+    {{"SERVICE PISTOL", 12, 34, 0, .22, 1.3, .008, 32, false},
+     {"AUTO CARBINE", 30, 35, 2400, .065, 2.1, .012, 64, true},
+     {"RAPID SMG", 32, 24, 1200, .05, 1.65, .023, 35, true},
+     {"BOLT SNIPER", 5, 110, 3500, 1.2, 2.6, .001, 96, false},
+     {"SCOUT DMR", 10, 72, 2800, .28, 2.2, .004, 85, false},
+     {"HEAVY PISTOL", 7, 65, 700, .3, 1.7, .01, 48, false},
+     {"COMPACT PISTOL", 20, 24, 400, .14, 1.25, .013, 28, false},
+     {"BURST PISTOL", 18, 28, 650, .065, 1.5, .018, 32, false},
+     {"SUPPRESSED RIFLE", 25, 36, 2900, .085, 2.2, .008, 65, true},
+     {"BATTLE RIFLE", 20, 48, 3000, .11, 2.4, .014, 75, true},
+     {"BULLPUP RIFLE", 30, 33, 2700, .075, 2.2, .01, 65, true},
+     {"PUMP SHOTGUN", 8, 13, 1600, .85, 2.8, .16, 18, false},
+     {"AUTO SHOTGUN", 7, 10, 2400, .28, 2.8, .18, 16, true},
+     {"BELT MACHINE GUN", 80, 30, 4500, .085, 4.2, .035, 65, true},
+     {"LIGHT SNIPER", 10, 80, 2000, 1., 2.3, .002, 90, false},
+     {"COMPACT PDW", 50, 22, 1900, .055, 2.4, .024, 42, true}}};
 struct Bot {
   double x, y;
   int hp = 100;
@@ -150,6 +171,8 @@ struct Bot {
          coverTime = 0;
   double coverX = 0, coverY = 0, senseTimer = 0, senseX = 0, senseY = 0;
   std::string state = "ADVANCE";
+  double deathTime = -1, walkPhase = 0, locomotion = 0;
+  int armor = 70;
 };
 struct Tracer {
   Vec from, to;
@@ -178,10 +201,15 @@ struct Impact {
   Vec p;
   double life;
 };
+struct DroppedWeapon {
+  Vec p, v;
+  double angle;
+  int gun, ammo, reserve;
+};
 struct Game {
   double x = 3, y = 16, a = 0, pitch = 0, shot = 0, muzzle = 0, reload = 0,
          time = 0, hurt = 0, hit = 0, recoil = 0, steps = 0, flash = 0,
-         clock = 115, plantProgress = 0, defuseProgress = 0, bombClock = 40,
+         clock = 150, plantProgress = 0, defuseProgress = 0, bombClock = 40,
          bombX = 0, bombY = 0, beep = 0, boltCycle = 0, freeze = 0, vx = 0,
          vy = 0, stance = 0, jumpHeight = 0, jumpVelocity = 0;
   bool sprinting = false;
@@ -190,10 +218,13 @@ struct Game {
   bool won = false, ended = false, attacker = true, planted = false,
        usingObjective = false, buyOpen = false, walking = false, ads = false;
   std::string result;
-  std::array<bool, 5> owned{{true, false, false, false, false}};
-  std::array<int, 5> magazines{{12, 30, 32, 5, 10}},
-      reserve{{48, 90, 96, 15, 30}};
-  std::array<int, 3> utilities{{1, 1, 1}};
+  bool matchOver = false, matchWon = false, startAttacker = true,
+       playerDropped = false, utilityEquipped = false;
+  double visualTime = 0, equipAnim = 0;
+  int primary = -1, secondary = 0, burstRemaining = 0;
+  std::array<bool, WEAPON_COUNT> owned{{true}};
+  std::array<int, WEAPON_COUNT> magazines{}, reserve{};
+  std::array<int, 3> utilities{{0, 0, 0}};
   int utility = 0;
   uint32_t random = 913;
   std::vector<Bot> bots;
@@ -204,6 +235,7 @@ struct Game {
   std::vector<Blast> blasts;
   std::vector<Particle> particles;
   std::vector<Impact> impacts;
+  std::vector<DroppedWeapon> drops;
   std::vector<std::string> feed;
   Game() { reset(); }
   int &ammo() { return magazines[weapon]; }
@@ -213,11 +245,19 @@ struct Game {
     return double(random >> 8) / 16777216.;
   }
   void reset() {
+    if (matchOver)
+      return;
+    if (round == 0)
+      startAttacker = attacker;
     round++;
-    if (round > 1)
-      attacker = !attacker;
-    x = attacker ? 3 : 28;
-    y = 16;
+    attacker = startAttacker ^ (((round - 1) / 6) % 2 != 0);
+    x = attacker ? HOME_T.x : HOME_CT.x;
+    y = attacker ? HOME_T.y : HOME_CT.y;
+    playerDropped = false;
+    utilityEquipped = false;
+    burstRemaining = 0;
+    equipAnim = 0;
+    drops.clear();
     a = attacker ? 0 : PI;
     pitch = shot = muzzle = reload = time = hurt = hit = recoil = steps =
         flash = plantProgress = defuseProgress = beep = boltCycle = 0;
@@ -229,22 +269,22 @@ struct Game {
     feed.clear();
     hp = 100;
     kills = 0;
-    clock = 115;
+    clock = 150;
     bombClock = 40;
     won = ended = planted = usingObjective = buyOpen = walking = ads = false;
     result.clear();
     bots.clear();
     const std::array<Vec, 5> tSpawn = {
-        {{3, 13, 0}, {3, 19, 0}, {5.8, 17.5, 0}, {5, 20, 0}, {3, 22, 0}}};
+        {{5, 28, 0}, {5, 35, 0}, {5, 38, 0}, {3, 31, 0}, {3, 34, 0}}};
     const std::array<Vec, 5> ctSpawn = {
-        {{27, 5, 0}, {27, 26, 0}, {25, 15, 0}, {28, 18, 0}, {28, 22, 0}}};
+        {{57, 12, 0}, {57, 52, 0}, {58, 25, 0}, {59, 39, 0}, {60, 34, 0}}};
     for (int team = 0; team < 2; team++)
       for (int i = 0; i < 5; i++) {
         Vec p = team ? tSpawn[i] : ctSpawn[i];
         Bot bot{p.x, p.y};
         bot.terrorist = team;
         bot.role = i;
-        bot.gun = i == 4 ? 3 : i == 1 ? 2 : 1;
+        bot.gun = i == 4 ? 3 : i == 1 ? 15 : i == 2 ? 8 : i == 3 ? 9 : 1;
         bot.ammo = weapons[bot.gun].capacity;
         bot.facing = team ? 0 : PI;
         bot.cooldown = .5 + i * .12;
@@ -255,13 +295,16 @@ struct Game {
     grenades.clear();
     smokes.clear();
     blasts.clear();
-    utilities = {1, 1, 1};
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < WEAPON_COUNT; i++) {
       magazines[i] = weapons[i].capacity;
       reserve[i] = weapons[i].capacity * 3;
     }
+    if (secondary < 0) {
+      secondary = 0;
+      owned[0] = true;
+    }
     if (!owned[weapon])
-      weapon = 0;
+      weapon = secondary;
   }
   void finish(bool victory, const std::string &why) {
     if (ended)
@@ -275,9 +318,17 @@ struct Game {
     } else {
       losses++;
       money += 1900;
-      armor = 0;
-      owned = {true, false, false, false, false};
     }
+    if (hp <= 0) {
+      owned.fill(false);
+      owned[0] = true;
+      primary = -1;
+      secondary = 0;
+      armor = 0;
+      utilities = {0, 0, 0};
+    }
+    matchOver = wins >= 7 || losses >= 7;
+    matchWon = wins >= 7;
     money = std::min(16000, money);
     sounds.push_back(victory ? WinSound : Explosion);
   }
@@ -364,39 +415,124 @@ struct Game {
       jumpVelocity = 3.5;
   }
   bool buyAllowed() const {
-    return hp > 0 && time < 22 && dist(x, y, attacker ? 3 : 28, 16) < 4 &&
+    return hp > 0 && time < 22 &&
+           dist(x, y, attacker ? HOME_T.x : HOME_CT.x,
+                attacker ? HOME_T.y : HOME_CT.y) < 5 &&
            !ended;
   }
-  bool buy(int item) {
-    if (!buyAllowed())
+  bool buyGun(int gun) {
+    if (gun < 0 || gun >= WEAPON_COUNT || boltCycle > 0 || !buyAllowed() ||
+        owned[gun] || money < weapons[gun].price)
       return false;
-    if ((item >= 1 && item <= 3) || item == 6) {
-      if (item == 6)
-        item = 4;
-      if (owned[item] || money < weapons[item].price)
-        return false;
-      money -= weapons[item].price;
-      owned[item] = true;
-      switchWeapon(item);
-      return true;
-    }
-    if (item == 4 && money >= 650 && armor < 100) {
+    int previous = secondaryGun(gun) ? secondary : primary;
+    if (previous >= 0 && owned[previous])
+      dropGun(previous);
+    money -= weapons[gun].price;
+    owned[gun] = true;
+    if (secondaryGun(gun))
+      secondary = gun;
+    else
+      primary = gun;
+    magazines[gun] = weapons[gun].capacity;
+    reserve[gun] = weapons[gun].capacity * 3;
+    switchWeapon(gun);
+    return true;
+  }
+  bool buyUtility(int type) {
+    static constexpr int cost[3] = {300, 300, 200};
+    if (type < 0 || type >= 3 || !buyAllowed() || money < cost[type] ||
+        utilities[type] >= (type == 2 ? 2 : 1))
+      return false;
+    money -= cost[type];
+    utilities[type]++;
+    return true;
+  }
+  bool buy(int item) {
+    if (item >= 100 && item < 100 + WEAPON_COUNT)
+      return buyGun(item - 100);
+    if (item >= 200 && item < 203)
+      return buyUtility(item - 200);
+    if (item == 4 && buyAllowed() && money >= 650 && armor < 100) {
       money -= 650;
       armor = 100;
       return true;
     }
-    if (item == 5 && money >= 300) {
-      money -= 300;
-      for (auto &n : utilities)
-        n = std::min(2, n + 1);
-      return true;
-    }
     return false;
   }
+  void dropGun(int gun) {
+    if (gun < 0 || gun >= WEAPON_COUNT || !owned[gun])
+      return;
+    drops.push_back({{x, y, 1.1},
+                     {cos(a) * 1.4, sin(a) * 1.4, 1},
+                     a,
+                     gun,
+                     magazines[gun],
+                     reserve[gun]});
+    owned[gun] = false;
+    if (primary == gun)
+      primary = -1;
+    if (secondary == gun)
+      secondary = -1;
+    if (weapon == gun) {
+      reload = boltCycle = shot = 0;
+      burstRemaining = 0;
+      utilityEquipped = false;
+      if (primary >= 0)
+        weapon = primary;
+      else if (secondary >= 0)
+        weapon = secondary;
+    }
+  }
+  int nearbyDrop() const {
+    int id = -1;
+    double best = 1.8;
+    for (size_t i = 0; i < drops.size(); i++) {
+      double d = dist(x, y, drops[i].p.x, drops[i].p.y);
+      if (d < best && clearLine(x, y, drops[i].p.x, drops[i].p.y)) {
+        best = d;
+        id = int(i);
+      }
+    }
+    return id;
+  }
+  bool pickup() {
+    int id = nearbyDrop();
+    if (hp <= 0 || ended || boltCycle > 0 || id < 0)
+      return false;
+    auto drop = drops[id];
+    drops.erase(drops.begin() + id);
+    int previous = secondaryGun(drop.gun) ? secondary : primary;
+    if (previous >= 0 && owned[previous])
+      dropGun(previous);
+    owned[drop.gun] = true;
+    if (secondaryGun(drop.gun))
+      secondary = drop.gun;
+    else
+      primary = drop.gun;
+    magazines[drop.gun] = drop.ammo;
+    reserve[drop.gun] = drop.reserve;
+    switchWeapon(drop.gun);
+    return true;
+  }
+  void playerDeath() {
+    if (hp > 0 || playerDropped)
+      return;
+    playerDropped = true;
+    for (int i = 0; i < WEAPON_COUNT; i++)
+      if (owned[i])
+        dropGun(i);
+    utilities = {0, 0, 0};
+    utilityEquipped = false;
+    armor = 0;
+  }
   void switchWeapon(int i) {
-    if (i < 0 || i > 4 || !owned[i] || ended || hp <= 0 || boltCycle > 0)
+    if (i < 0 || i >= WEAPON_COUNT || !owned[i] || ended || hp <= 0 ||
+        boltCycle > 0)
       return;
     weapon = i;
+    utilityEquipped = false;
+    burstRemaining = 0;
+    equipAnim = .3;
     reload = 0;
     shot = .2;
     plantProgress = defuseProgress = 0;
@@ -406,6 +542,8 @@ struct Game {
         ammo() == gun().capacity || reserve[weapon] <= 0)
       return;
     reload = gun().reload;
+    utilityEquipped = false;
+    burstRemaining = 0;
     sounds.push_back(MagOut);
     plantProgress = defuseProgress = 0;
   }
@@ -422,73 +560,92 @@ struct Game {
   }
   void fire() {
     if (hp <= 0 || ended || freeze > 0 || buyOpen || shot > .000001 ||
-        boltCycle > 0 || reload > 0 || usingObjective)
+        boltCycle > 0 || reload > 0 || usingObjective || !owned[weapon])
       return;
     if (ammo() <= 0) {
       shot = .25;
+      burstRemaining = 0;
       sounds.push_back(Empty);
       return;
     }
     ammo()--;
     shot = std::max(-.005, shot) + gun().delay;
-    if (weapon == 3)
-      boltCycle = .95;
+    if (boltGun(weapon) || weapon == 11)
+      boltCycle = weapon == 11 ? .55 : .8;
+    if (burstRemaining > 0) {
+      burstRemaining--;
+      if (burstRemaining == 0)
+        shot += .2;
+    }
     muzzle = .055;
     recoil = std::min(2., recoil + .65);
     sounds.push_back(Rifle);
-    hear(x, y, 24);
+    hear(x, y, weapon == 8 ? 12 : 35);
+    int pellets = weapon == 11 || weapon == 12 ? 8 : 1;
     double spread = gun().spread *
                     (jumpHeight > .03 ? 5
                      : walking        ? 3
                      : stance > .5    ? .65
                                       : 1) *
                     (ads ? .4 : 1) * (1 + recoil * .4);
-    Vec dir =
-        direction(a + (rng() - .5) * spread, pitch + (rng() - .5) * spread);
     Vec origin = {x, y, 1.6 - stance * .5 + jumpHeight};
-    double nearest = geometry(origin, dir, gun().range);
-    Bot *target = nullptr;
-    bool head = false;
-    for (auto &b : bots) {
-      if (b.hp <= 0)
-        continue;
-      double body = boxHit(origin, dir,
-                           {b.x - .24, b.y - .24, .2, .48, .48, 1.23, 0}),
-             skull = boxHit(origin, dir,
-                            {b.x - .17, b.y - .17, 1.43, .34, .34, .37, 0});
-      double d = std::min(body, skull);
-      if (d < nearest) {
-        nearest = d;
-        target = &b;
-        head = skull < body;
+    for (int pellet = 0; pellet < pellets; pellet++) {
+      Vec dir =
+          direction(a + (rng() - .5) * spread, pitch + (rng() - .5) * spread);
+      double nearest = geometry(origin, dir, gun().range);
+      int target = -1;
+      bool head = false;
+      for (size_t i = 0; i < bots.size(); i++) {
+        auto &b = bots[i];
+        if (b.hp <= 0)
+          continue;
+        double body = boxHit(origin, dir,
+                             {b.x - .24, b.y - .24, .2, .48, .48, 1.23, 0}),
+               skull = boxHit(origin, dir,
+                              {b.x - .17, b.y - .17, 1.43, .34, .34, .37, 0}),
+               d = std::min(body, skull);
+        if (d < nearest) {
+          nearest = d;
+          target = int(i);
+          head = skull < body;
+        }
+      }
+      tracers.push_back({origin, origin + dir * nearest, .09, false});
+      if (target >= 0 && bots[target].terrorist != attacker) {
+        damageBot(target, gun().damage * (head ? 3 : 1), -1);
+        hit = .2;
+        sounds.push_back(Hit);
+      } else if (target < 0) {
+        Vec at = origin + dir * std::max(0., nearest - .025);
+        impacts.push_back({at, 20});
+        if (impacts.size() > 64)
+          impacts.erase(impacts.begin());
+        for (int i = 0; i < 3; i++)
+          particles.push_back(
+              {at,
+               {(rng() - .5) * 1.5, (rng() - .5) * 1.5, rng() * 1.4},
+               .25,
+               0xFFC983});
       }
     }
-    tracers.push_back({origin, origin + dir * nearest, .09, false});
     particles.push_back({origin + Vec{-sin(a) * .2, cos(a) * .2, -.12},
                          {-sin(a) * 1.7, cos(a) * 1.7, 1.1},
                          1.,
                          0xC7A65C});
-    if (!target) {
-      Vec at = origin + dir * std::max(0., nearest - .025);
-      impacts.push_back({at, 20});
-      if (impacts.size() > 64)
-        impacts.erase(impacts.begin());
-      for (int i = 0; i < 4; i++)
-        particles.push_back(
-            {at,
-             {(rng() - .5) * 1.5, (rng() - .5) * 1.5, rng() * 1.4},
-             .25,
-             0xFFC983});
-    }
-    if (target && target->terrorist != attacker) {
-      damageBot(int(target - bots.data()), gun().damage * (head ? 3 : 1), -1);
-      hit = .2;
-      sounds.push_back(Hit);
-    }
     checkElimination();
   }
   void trigger(bool held, bool pressed) {
-    if (gun().automatic ? held : pressed)
+    if (utilityEquipped) {
+      if (pressed)
+        throwUtility();
+      return;
+    }
+    if (weapon == 7) {
+      if (pressed && shot <= 0 && reload <= 0)
+        burstRemaining = 3;
+      if (burstRemaining > 0)
+        fire();
+    } else if (gun().automatic ? held : pressed)
       fire();
   }
   int alive(bool terrorists) const {
@@ -527,10 +684,23 @@ struct Game {
     auto &b = bots[i];
     if (b.hp <= 0)
       return;
+    if (b.armor > 0) {
+      int gun = source == -1 ? weapon : source >= 0 ? bots[source].gun : 1;
+      damage =
+          int(damage * ((scopedGun(gun) || gun == 5 || gun == 9) ? .96 : .78));
+      b.armor = std::max(0, b.armor - damage / 3);
+    }
     b.hp = std::max(0, b.hp - damage);
     b.suppression = 1.2;
     if (b.hp == 0) {
       b.plant = 0;
+      b.deathTime = visualTime;
+      drops.push_back({{b.x, b.y, 1.1},
+                       {cos(b.facing), sin(b.facing), 1},
+                       b.facing,
+                       b.gun,
+                       b.ammo,
+                       weapons[b.gun].capacity * 2});
       std::string from = source == -1  ? "YOU"
                          : source >= 0 ? botName(source)
                                        : "BLAST";
@@ -562,16 +732,17 @@ struct Game {
   }
   void tickBots(double dt);
   int site(double xx, double yy) const {
-    if (dist(xx, yy, 27, 5) < 3)
+    if (dist(xx, yy, SITE_A.x, SITE_A.y) < 4)
       return 1;
-    if (dist(xx, yy, 27, 26) < 3)
+    if (dist(xx, yy, SITE_B.x, SITE_B.y) < 4)
       return 2;
     return 0;
   }
   void throwUtility() {
-    if (ended || hp <= 0 || buyOpen || utilities[utility] <= 0)
+    if (ended || freeze > 0 || hp <= 0 || buyOpen || utilities[utility] <= 0)
       return;
     utilities[utility]--;
+    utilityEquipped = false;
     Vec dir = direction(a, pitch);
     grenades.push_back({{x, y, 1.4},
                         {dir.x * 8, dir.y * 8, std::max(1., dir.z * 6 + 3)},
@@ -612,6 +783,21 @@ struct Game {
   void tick(double dt) {
     if (ended)
       return;
+    equipAnim = std::max(0., equipAnim - dt);
+    for (auto &d : drops) {
+      d.v.z -= 9.8 * dt;
+      Vec next = d.p + d.v * dt;
+      if (!arena.solid(next.x, next.y, .1)) {
+        d.p.x = next.x;
+        d.p.y = next.y;
+      } else
+        d.v.x = d.v.y = 0;
+      d.p.z = next.z;
+      if (d.p.z < .09) {
+        d.p.z = .09;
+        d.v = d.v * .0;
+      }
+    }
     if (freeze > 0) {
       freeze = std::max(0., freeze - dt);
       return;
@@ -740,6 +926,7 @@ struct Game {
     grenades.erase(std::remove_if(grenades.begin(), grenades.end(),
                                   [](Grenade g) { return g.fuse <= 0; }),
                    grenades.end());
+    playerDeath();
     if (checkElimination())
       return;
     if (hp > 0 && usingObjective && reload <= 0 && !walking) {
@@ -780,6 +967,7 @@ struct Game {
     }
     tickBots(dt);
     hp = std::max(0, hp);
+    playerDeath();
     if (hp <= 0) {
       plantProgress = defuseProgress = 0;
       usingObjective = buyOpen = false;
@@ -787,8 +975,11 @@ struct Game {
     checkElimination();
   }
   std::string objectiveText() const {
+    if (matchOver)
+      return std::string(matchWon ? "MATCH WON " : "MATCH LOST ") +
+             std::to_string(wins) + " : " + std::to_string(losses);
     if (ended)
-      return result + " | Enter: next round";
+      return result + " | Next round";
     if (planted)
       return std::string(attacker ? "DEFEND THE BOMB  "
                                   : "DEFUSE: HOLD F NEAR BOMB  ") +

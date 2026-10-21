@@ -318,16 +318,28 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
       ui.open(ScreenPage::Roster, game);
       syncCapture(win);
     }
-    if (w >= '1' && w <= '5') {
+    if (w == '1' && game.primary >= 0) {
       ui.lastWeapon = game.weapon;
-      game.switchWeapon(int(w - '1'));
+      game.switchWeapon(game.primary);
+    }
+    if (w == '2' && game.secondary >= 0) {
+      ui.lastWeapon = game.weapon;
+      game.switchWeapon(game.secondary);
+    }
+    if (w == 'E')
+      game.pickup();
+    if (w == 'G' && !game.utilityEquipped)
+      game.dropGun(game.weapon);
+    if (w == 'Q' && game.utilityEquipped) {
+      game.utilityEquipped = false;
+      return 0;
     }
     if (w == 'Q') {
       int previous = game.weapon;
       game.switchWeapon(ui.lastWeapon);
       ui.lastWeapon = previous;
     }
-    if (w == 'G')
+    if (w == 'H')
       game.throwUtility();
     if (w == 'V' && game.hp <= 0)
       game.spectator++;
@@ -384,6 +396,7 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
     return 0;
   case WM_MBUTTONUP:
     if (ui.page == ScreenPage::Utility) {
+      game.utilityEquipped = true;
       ui.open(ScreenPage::Play, game);
       syncCapture(win);
     }
@@ -416,8 +429,8 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
     if (home) {
       double x = game.x, y = game.y, a = game.a, p = game.pitch;
       int gun = game.weapon;
-      game.x = 13;
-      game.y = 14;
+      game.x = 24;
+      game.y = 26;
       game.a = .25;
       game.pitch = -.03;
       game.weapon = 1;
@@ -458,6 +471,14 @@ LRESULT CALLBACK proc(HWND win, UINT msg, WPARAM w, LPARAM l) {
   return DefWindowProcA(win, msg, w, l);
 }
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
+  char module[MAX_PATH] = {};
+  DWORD moduleSize = GetModuleFileNameA(nullptr, module, MAX_PATH);
+  if (moduleSize > 0 && moduleSize < MAX_PATH) {
+    std::string path(module);
+    auto slash = path.find_last_of("\\/");
+    if (slash != std::string::npos)
+      loadArt(path.substr(0, slash) + "/assets");
+  }
   char local[MAX_PATH] = {};
   DWORD n = GetEnvironmentVariableA("LOCALAPPDATA", local, MAX_PATH);
   if (n > 0 && n < MAX_PATH) {
@@ -474,7 +495,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
   RegisterClassA(&wc);
   RECT r = {0, 0, W, H};
   AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-  HWND win = CreateWindowA(wc.lpszClassName, "Breach / Dockyard",
+  HWND win = CreateWindowA(wc.lpszClassName, "Breach / Harbor",
                            WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
                            CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                            nullptr, nullptr, inst, nullptr);

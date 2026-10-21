@@ -89,28 +89,43 @@ struct Interface {
       add(235, 405, 145, 45, "MAIN MENU", "", 8);
     }
     if (page == ScreenPage::Buy) {
-      add(55, 110, 185, 42, "WEAPONS", "", 20);
-      add(250, 110, 185, 42, "EQUIPMENT", "", 21);
+      const std::array<std::string, 5> tabs = {{"RIFLES / HEAVY",
+                                                "SMG / SHOTGUN", "SNIPERS",
+                                                "SIDEARMS", "EQUIPMENT"}};
+      for (int i = 0; i < 5; i++)
+        add(55 + i * 171, 110, 161, 42, tabs[i], "", 20 + i);
       add(760, 40, 150, 42, "BACK TO GAME", "", 5);
-      if (buyTab == 0) {
-        for (int i = 1; i < 5; i++) {
-          int n = i - 1, x = 55 + n % 2 * 435, y = 180 + n / 2 * 150;
+      const std::array<std::vector<int>, 4> categories = {
+          {{1, 8, 9, 10, 13}, {2, 15, 11, 12}, {3, 4, 14}, {0, 5, 6, 7}}};
+      if (buyTab < 4) {
+        int n = 0;
+        for (int i : categories[buyTab]) {
+          int x = 55 + n % 3 * 285, y = 180 + n / 3 * 150;
           auto &w = weapons[i];
           std::string detail = g.owned[i]
-                                   ? "OWNED / CLICK TO EQUIP"
-                                   : "$" + std::to_string(w.price) + "  /  " +
+                                   ? "OWNED / EQUIP"
+                                   : "$" + std::to_string(w.price) + " / " +
                                          std::to_string(w.capacity) + " ROUNDS";
-          add(x, y, 415, 128, w.name, detail, 100 + i,
+          add(x, y, 265, 128, w.name, detail, 100 + i,
               (g.owned[i] || (g.money >= w.price && g.buyAllowed())) &&
                   g.hp > 0);
+          n++;
         }
       } else {
-        add(55, 180, 415, 128, "KEVLAR ARMOR", "$650 / REDUCED INCOMING DAMAGE",
-            110, g.buyAllowed() && g.money >= 650 && g.armor < 100);
-        add(490, 180, 415, 128, "UTILITY PACK", "$300 / FRAG + SMOKE + FLASH",
-            111, g.buyAllowed() && g.money >= 300);
-        add(55, 330, 850, 110, "SERVICE PISTOL", "ALWAYS OWNED / EQUIP", 100,
-            g.hp > 0);
+        add(55, 180, 415, 128, "KEVLAR ARMOR", "$650 / REDUCED DAMAGE", 300,
+            g.buyAllowed() && g.money >= 650 && g.armor < 100);
+        const std::array<std::string, 3> names = {
+            {"FRAG GRENADE", "SMOKE GRENADE", "FLASH GRENADE"}};
+        const int prices[3] = {300, 300, 200};
+        for (int i = 0; i < 3; i++) {
+          int n = i + 1;
+          add(55 + n % 2 * 435, 180 + n / 2 * 150, 415, 128, names[i],
+              "$" + std::to_string(prices[i]) + " / OWNED " +
+                  std::to_string(g.utilities[i]),
+              310 + i,
+              g.buyAllowed() && g.money >= prices[i] &&
+                  g.utilities[i] < (i == 2 ? 2 : 1));
+        }
       }
     }
     if (page == ScreenPage::Settings) {
@@ -135,8 +150,11 @@ struct Interface {
       add(380, 452, 200, 48, "RETURN", "", 5);
     }
     if (page == ScreenPage::Result) {
-      add(295, 315, 370, 64, "NEXT ROUND",
-          "Switch sides / replenish ammunition", 10);
+      add(295, 315, 370, 64, g.matchOver ? "NEW MATCH" : "NEXT ROUND",
+          g.matchOver        ? "Start a fresh first-to-seven match"
+          : g.round % 6 == 0 ? "HALFTIME / SWITCH SIDES"
+                             : "Same team / continue the match",
+          10);
       add(295, 395, 180, 48, "SETTINGS", "", 3);
       add(490, 395, 175, 48, "MAIN MENU", "", 8);
     }
@@ -221,12 +239,16 @@ struct Interface {
       return;
     }
     if (action == 10) {
+      if (g.matchOver) {
+        start(g, g.startAttacker);
+        return;
+      }
       g.reset();
       g.freeze = 8;
       open(ScreenPage::Buy, g);
       return;
     }
-    if (action == 20 || action == 21) {
+    if (action >= 20 && action <= 24) {
       buyTab = action - 20;
       return;
     }
@@ -242,7 +264,7 @@ struct Interface {
       prefs.invertY = !prefs.invertY;
       return;
     }
-    if (action >= 100 && action <= 104) {
+    if (action >= 100 && action < 100 + WEAPON_COUNT) {
       int gun = action - 100;
       if (g.boltCycle > 0) {
         feedback = "WAIT FOR BOLT CYCLE";
@@ -253,19 +275,20 @@ struct Interface {
         lastWeapon = g.weapon;
         g.switchWeapon(gun);
         feedback = "EQUIPPED " + std::string(weapons[gun].name);
-      } else if (g.buy(gun == 4 ? 6 : gun))
+      } else if (g.buyGun(gun))
         feedback = "PURCHASED " + std::string(weapons[gun].name);
       else
         feedback = "PURCHASE UNAVAILABLE";
       feedbackTime = 2;
     }
-    if (action == 110 || action == 111) {
-      feedback = g.buy(action == 110 ? 4 : 5) ? "EQUIPMENT PURCHASED"
-                                              : "PURCHASE UNAVAILABLE";
+    if (action == 300 || (action >= 310 && action <= 312)) {
+      bool ok = action == 300 ? g.buy(4) : g.buyUtility(action - 310);
+      feedback = ok ? "EQUIPMENT PURCHASED" : "PURCHASE UNAVAILABLE";
       feedbackTime = 2;
     }
     if (action >= 200 && action <= 202 && g.utilities[action - 200] > 0) {
       g.utility = action - 200;
+      g.utilityEquipped = true;
       selectedUtility = g.utility;
       open(ScreenPage::Play, g);
     }
@@ -308,8 +331,9 @@ struct Interface {
         g.spectator++;
         return;
       }
-      for (int step = 1; step <= 5; step++) {
-        int i = (g.weapon + (direction > 0 ? -step : step) + 10) % 5;
+      for (int step = 1; step <= WEAPON_COUNT; step++) {
+        int i = (g.weapon + (direction > 0 ? -step : step) + WEAPON_COUNT * 2) %
+                WEAPON_COUNT;
         if (g.owned[i]) {
           if (i == g.weapon)
             break;
@@ -328,7 +352,7 @@ struct Interface {
         }
       }
     } else if (page == ScreenPage::Buy)
-      buyTab = 1 - buyTab;
+      buyTab = (buyTab + (direction > 0 ? -1 : 1) + 5) % 5;
     else if (page == ScreenPage::Settings) {
       if (my >= 185 && my < 225)
         prefs.sensitivity += direction * .1;
@@ -340,6 +364,7 @@ struct Interface {
     }
   }
   void update(double dt, Game &g) {
+    g.visualTime += dt;
     feedbackTime = std::max(0., feedbackTime - dt);
     if (g.ended && simulates())
       open(ScreenPage::Result, g);

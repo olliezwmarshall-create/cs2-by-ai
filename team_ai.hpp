@@ -30,6 +30,7 @@ void Game::tickBots(double dt) {
     b.repath -= dt;
     b.communicate -= dt;
     b.coverTime -= dt;
+    double oldX = b.x, oldY = b.y;
     const auto &gun = weapons[b.gun];
     if (b.reload > 0) {
       b.reload = std::max(0., b.reload - dt);
@@ -37,7 +38,7 @@ void Game::tickBots(double dt) {
         b.ammo = gun.capacity;
     }
     b.senseTimer -= dt;
-    double tx = 0, ty = 0, best = 50;
+    double tx = 0, ty = 0, best = 96;
     int target = -2;
     auto consider = [&](double xx, double yy, int id) {
       double d = dist(b.x, b.y, xx, yy);
@@ -57,7 +58,7 @@ void Game::tickBots(double dt) {
       for (size_t j = 0; j < bots.size(); j++)
         if (bots[j].hp > 0 && bots[j].terrorist != b.terrorist)
           consider(bots[j].x, bots[j].y, int(j));
-      b.senseTimer = .08 + b.role * .008;
+      b.senseTimer = .045 + b.role * .004;
       b.senseX = tx;
       b.senseY = ty;
     } else if (b.blind <= 0 && b.target != -2) {
@@ -72,7 +73,7 @@ void Game::tickBots(double dt) {
     }
     bool sees = target != -2;
     if (target != b.target)
-      b.reaction = .18 + rng() * .22;
+      b.reaction = .09 + rng() * .08;
     b.target = target;
     b.reaction = std::max(0., b.reaction - dt);
     if (sees) {
@@ -82,10 +83,10 @@ void Game::tickBots(double dt) {
       b.knows = true;
       b.facing = atan2(ty - b.y, tx - b.x);
       if (b.communicate <= 0) {
-        b.communicate = .5;
+        b.communicate = .25;
         for (auto &friendBot : bots)
           if (friendBot.hp > 0 && friendBot.terrorist == b.terrorist &&
-              dist(friendBot.x, friendBot.y, b.x, b.y) < 12) {
+              dist(friendBot.x, friendBot.y, b.x, b.y) < 22) {
             friendBot.knows = true;
             friendBot.lastX = tx;
             friendBot.lastY = ty;
@@ -105,7 +106,7 @@ void Game::tickBots(double dt) {
     }
     double gx = b.lastX, gy = b.lastY;
     bool doingObjective = false;
-    int chosenSite = (round % 2) ? 5 : 26;
+    Vec chosenSite = (round % 2) ? SITE_A : SITE_B;
     if (planted) {
       if (!b.terrorist && int(i) == defuser) {
         gx = bombX;
@@ -120,14 +121,14 @@ void Game::tickBots(double dt) {
         b.state = b.terrorist ? "HOLD BOMB" : "COVER DEFUSER";
       }
     } else if (b.terrorist) {
-      gx = 27;
-      gy = chosenSite;
+      gx = chosenSite.x;
+      gy = chosenSite.y;
       b.state = int(i) == planter ? "PLANT" : "ESCORT";
       doingObjective = true;
       // Flankers use the other connector before converging on the bomb site.
-      if (b.role == 3 && b.x < 18) {
-        gx = 16;
-        gy = chosenSite == 5 ? 19 : 14;
+      if (b.role == 3 && b.x < 40) {
+        gx = 40;
+        gy = chosenSite.y == SITE_A.y ? 38 : 26;
         b.state = "FLANK";
       }
       if (sees && best < 12 && int(i) != planter) {
@@ -137,8 +138,8 @@ void Game::tickBots(double dt) {
         b.state = "ENGAGE";
       }
     } else {
-      gx = b.role == 2 ? 16 : 27;
-      gy = b.role % 2 ? 26 : 5;
+      gx = b.role == 2 ? 40 : SITE_A.x;
+      gy = b.role % 2 ? SITE_B.y : SITE_A.y;
       b.state = "GUARD";
       if (b.knows && b.alert > 0) {
         gx = b.lastX;
@@ -176,7 +177,7 @@ void Game::tickBots(double dt) {
     bool canDefuse = !b.terrorist && planted && int(i) == defuser &&
                      dist(b.x, b.y, bombX, bombY) < 1.6 && (!sees || best > 7);
     bool hold = sees && !seekingCover && !doingObjective && best > 3 &&
-                best < (b.gun == 3 ? 30 : 13);
+                best < (scopedGun(b.gun) ? 45 : 20);
     bool objectiveHold = canPlant || canDefuse;
     if (b.blind <= 0 && !objectiveHold) {
       if (!hold && dist(b.x, b.y, gx, gy) > .4) {
@@ -191,7 +192,10 @@ void Game::tickBots(double dt) {
           if (d < .13)
             b.path.erase(b.path.begin());
           else {
-            double speed = (seekingCover ? 2. : b.gun == 3 ? 1.1 : 1.7) * dt;
+            double speed = (seekingCover       ? 2.7
+                            : scopedGun(b.gun) ? 1.7
+                                               : 2.25) *
+                           dt;
             double xx = b.x + (nx - b.x) / d * std::min(speed, d),
                    yy = b.y + (ny - b.y) / d * std::min(speed, d);
             if (!arena.solid(xx, b.y, .22))
@@ -229,6 +233,8 @@ void Game::tickBots(double dt) {
         }
       }
     }
+    b.locomotion = dist(oldX, oldY, b.x, b.y) / std::max(.001, dt);
+    b.walkPhase += b.locomotion * dt * 7;
     if (b.blind > 0) {
       b.plant = 0;
       b.state = "BLINDED";
@@ -284,9 +290,9 @@ void Game::tickBots(double dt) {
     }
     b.ammo--;
     b.flash = .055;
-    b.cooldown = b.gun == 3 ? 1.65 : .11 + rng() * .13;
-    if (b.gun != 3 && b.ammo % 4 == 0)
-      b.cooldown += .35; // controlled bursts
+    b.cooldown = boltGun(b.gun) ? 1.25 : gun.delay * (1. + rng() * .35);
+    if (!scopedGun(b.gun) && b.ammo % 6 == 0)
+      b.cooldown += .18; // controlled bursts
     tracers.push_back(
         {{b.x, b.y, 1.4}, {tx, ty, 1.35}, .09, b.terrorist != attacker});
     sounds.push_back(EnemyShot);
@@ -299,16 +305,17 @@ void Game::tickBots(double dt) {
         other.alert = 5;
       }
     double accuracy =
-        (b.gun == 3 ? .65 : .52) - best * .013 - b.suppression * .18;
-    bool hitTarget = rng() < std::clamp(accuracy, .08, .65);
+        (scopedGun(b.gun) ? .86 : .76) - best * .006 - b.suppression * .12;
+    bool hitTarget = rng() < std::clamp(accuracy, .25, .9);
     if (hitTarget) {
-      int damage = b.gun == 3 ? 65 : b.gun == 2 ? 11 : 17;
+      int damage = int(gun.damage * (rng() < .13 ? 1.65 : .82));
       if (target == -1 && hp > 0) {
         if (armor > 0) {
           damage = int(damage * .65);
           armor = std::max(0, armor - 5);
         }
         hp = std::max(0, hp - damage);
+        playerDeath();
         hurt = .25;
         if (hp == 0)
           log(botName(int(i)) + " > YOU");

@@ -1,4 +1,5 @@
 #pragma once
+#include "art_assets.hpp"
 #include "ui.hpp"
 Game game;
 std::vector<uint32_t> pixels(W *H);
@@ -36,11 +37,12 @@ void ellipse(int cx, int cy, int rx, int ry, unsigned c) {
 }
 double projectionOverride = 0, aimBlend = 0;
 int activeMaterial = 0;
+Area renderRegion{0, 0, W, H};
 double baseFocal() { return W / (2 * tan(ui.prefs.fov * PI / 360)); }
 double focal() {
   if (projectionOverride > 0)
     return projectionOverride;
-  double zoom = game.weapon == 3 ? 1400 : game.weapon == 4 ? 1100 : 850;
+  double zoom = scopedGun(game.weapon) ? baseFocal() : 850;
   return baseFocal() + (zoom - baseFocal()) * (game.hp > 0 ? aimBlend : 0);
 }
 struct Camera {
@@ -65,7 +67,7 @@ Screen screen(Vec p) {
   return {W * .5 + p.x * focal() / p.z, H * .5 - p.y * focal() / p.z, 1 / p.z};
 }
 struct ShadowField {
-  static constexpr int S = 128;
+  static constexpr int S = MAP * 4;
   std::array<double, S * S> light{}, ao{};
   ShadowField() {
     for (int y = 0; y < S; y++)
@@ -108,9 +110,9 @@ struct ShadowField {
 const ShadowField shadowField;
 struct TextureTiles {
   static constexpr int N = 128;
-  std::array<std::array<double, N * N>, 5> tiles{};
+  std::array<std::array<double, N * N>, 6> tiles{};
   TextureTiles() {
-    for (int m = 0; m < 5; m++)
+    for (int m = 0; m < 6; m++)
       for (int y = 0; y < N; y++)
         for (int x = 0; x < N; x++) {
           unsigned seed = unsigned(x) * 73856093u ^ unsigned(y) * 19349663u;
@@ -138,6 +140,8 @@ struct TextureTiles {
             if (fract(u * 6) < .025 && fract(v * 6) < .08)
               value *= .5;
           }
+          if (m == 5)
+            value *= ((x + y) % 4 == 0 ? .8 : 1.);
           tiles[m][y * N + x] = value;
         }
   }
@@ -161,15 +165,20 @@ double materialValue(Vec p, Vec normal, int material) {
 }
 void raster(Vec a, Vec b, Vec c, unsigned color,
             const std::array<Vec, 3> *world = nullptr, Vec normal = {},
-            int material = 0) {
+            int material = 0, const std::array<Vec, 3> *uv = nullptr,
+            const TextureImage *image = nullptr) {
   auto p = screen(a), q = screen(b), r = screen(c);
   double area = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
   if (std::abs(area) < .01)
     return;
-  int minx = int(std::max(0., floor(std::min({p.x, q.x, r.x})))),
-      maxx = int(std::min(double(W - 1), ceil(std::max({p.x, q.x, r.x}))));
-  int miny = int(std::max(0., floor(std::min({p.y, q.y, r.y})))),
-      maxy = int(std::min(double(H - 1), ceil(std::max({p.y, q.y, r.y}))));
+  int minx = int(
+          std::max(double(renderRegion.x), floor(std::min({p.x, q.x, r.x})))),
+      maxx = int(std::min(double(renderRegion.x + renderRegion.w - 1),
+                          ceil(std::max({p.x, q.x, r.x}))));
+  int miny = int(
+          std::max(double(renderRegion.y), floor(std::min({p.y, q.y, r.y})))),
+      maxy = int(std::min(double(renderRegion.y + renderRegion.h - 1),
+                          ceil(std::max({p.y, q.y, r.y}))));
   if (minx > maxx || miny > maxy)
     return;
   for (int y = miny; y <= maxy; y++)
@@ -200,11 +209,21 @@ void raster(Vec a, Vec b, Vec c, unsigned color,
           glow = std::max(0., 1 - d2 / 12) * .3;
         }
       }
+      unsigned surfaceColor = color;
+      if (uv && image) {
+        Vec st = ((*uv)[0] * (u * p.iz) + (*uv)[1] * (v * q.iz) +
+                  (*uv)[2] * (w * r.iz)) *
+                 distance;
+        surfaceColor = image->sample(st.x, st.y);
+        value = .72 + .28 * std::max(0., normal.x * .48 - normal.y * .38 +
+                                             normal.z * .8);
+      }
       double fog = std::min(.7, distance / 85), brightness = value * (1 - fog);
-      pixels[index] =
-          rgb(int(((color >> 16) & 255) * brightness + 130 * fog + 150 * glow),
-              int(((color >> 8) & 255) * brightness + 150 * fog + 90 * glow),
-              int((color & 255) * brightness + 157 * fog + 35 * glow));
+      pixels[index] = rgb(
+          int(((surfaceColor >> 16) & 255) * brightness + 130 * fog +
+              150 * glow),
+          int(((surfaceColor >> 8) & 255) * brightness + 150 * fog + 90 * glow),
+          int((surfaceColor & 255) * brightness + 157 * fog + 35 * glow));
     }
 }
 void triangle(Vec a, Vec b, Vec c, unsigned color, const Camera &camera) {
@@ -267,6 +286,7 @@ void beam(Vec a, Vec b, double radius, unsigned color, const Camera &camera) {
   quad(a - right, b - right, b + right, a + right, color, camera);
   quad(a - up, b - up, b + up, a + up, color, camera);
 }
+#include "model_render.hpp"
 void drawWorld() {
   Camera camera;
   std::fill(zbuffer.begin(), zbuffer.end(), 0);
@@ -280,7 +300,11 @@ void drawWorld() {
   }
   for (int y = 0; y < MAP; y++)
     for (int x = 0; x < MAP; x++) {
-      if (dist(camera.origin.x, camera.origin.y, x + .5, y + .5) > 42)
+      if (dist(camera.origin.x, camera.origin.y, x + .5, y + .5) > 75)
+        continue;
+      Vec center = camera.transform({x + .5, y + .5, 1.6});
+      if (center.z < -2 ||
+          std::abs(center.x) > std::max(1., center.z) * W / (2 * focal()) + 3)
         continue;
       double xx = x, yy = y;
       activeMaterial = 2;
@@ -328,23 +352,15 @@ void drawWorld() {
           cube({xx - .04, yy - .04, 2.8, 1.08, 1.08, .18, 0x5E696C}, camera);
       }
     }
-  activeMaterial = 3;
-  for (auto p : arena.props) {
-    cube(p, camera);
-    cube(
-        {p.x - .025, p.y - .025, p.h * .3, p.w + .05, p.d + .05, .07, 0x414A48},
-        camera);
-    cube(
-        {p.x - .025, p.y - .025, p.h * .8, p.w + .05, p.d + .05, .07, 0x414A48},
-        camera);
-  }
+  for (size_t index = 0; index < arena.props.size(); index++)
+    drawProp(arena.props[index], int(index), camera);
   activeMaterial = 4;
   // Physical overhead pipe bridges and support posts, well above the player.
-  for (int xx : {5, 17, 25}) {
-    cube({double(xx), 13, 3.5, .25, 7, .25, 0x637375, false}, camera);
-    cube({double(xx), 13, 0, .18, .18, 3.5, 0x637375, false}, camera);
+  for (int xx : {12, 27, 42, 55}) {
+    cube({double(xx), 26, 5.5, .25, 12, .25, 0x637375, false}, camera);
+    cube({double(xx), 26, 0, .18, .18, 5.5, 0x637375, false}, camera);
   }
-  for (auto site : std::array<Vec, 2>{{{27, 5, 0}, {27, 26, 0}}}) {
+  for (auto site : std::array<Vec, 2>{{SITE_A, SITE_B}}) {
     for (int i = 0; i < 4; i++) {
       double x = site.x - 2 + i;
       quad({x, site.y - 2, .012}, {x + .5, site.y - 2, .012},
@@ -356,6 +372,16 @@ void drawWorld() {
     cube({site.x + 1.78, site.y - 1.04, 1.6, .65, .2, .65, 0xA54832, false},
          camera);
   }
+  for (auto pos : std::array<Vec, 4>{
+           {{12.4, 26, 0}, {23, 38, 0}, {43, 18, 0}, {50, 48, 0}}})
+    if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 22)
+      drawArt(lanternArt, pos, 3.7, 0, camera);
+  for (auto pos : std::array<Vec, 4>{{{24.3, 17.5, 1.4},
+                                      {24.3, 46.5, 1.4},
+                                      {55.4, 8.4, 1.1},
+                                      {56.5, 55.4, 1.1}}})
+    if (dist(camera.origin.x, camera.origin.y, pos.x, pos.y) < 12)
+      drawArt(bottleArt, pos, .55, 0, camera);
   activeMaterial = 0;
   // Soft contact shadows anchor moving characters to the paving.
   for (auto &b : game.bots)
@@ -365,34 +391,9 @@ void drawWorld() {
            camera);
   for (size_t i = 0; i < game.bots.size(); i++) {
     auto b = game.bots[i];
-    if (b.hp <= 0) {
-      cube({b.x - .45, b.y - .2, .03, .9, .4, .2, 0x3C4C4D}, camera);
-      continue;
-    }
-    double anim = b.path.empty() ? 0 : sin(game.time * 9 + i) * .13;
     if (int(i) == game.spectating())
       continue;
-    unsigned cloth = b.terrorist ? 0x827149 : 0x456478;
-    if (b.terrorist == game.attacker)
-      cube({b.x - .06, b.y - .06, 2.02, .12, .12, .12, 0x8FE5A7, false},
-           camera);
-    cube({b.x - .23, b.y - .17, .7, .46, .34, .7, cloth}, camera);
-    cube({b.x - .19, b.y - .21, .88, .38, .42, .44, 0x303C40}, camera);
-    cube({b.x - .16, b.y - .15, 1.43, .32, .3, .32, 0xB9A07D}, camera);
-    cube({b.x - .19, b.y - .18, 1.62, .38, .36, .2, 0x34444A}, camera);
-    cube({b.x - .28, b.y - .17, 1.18, .13, .3, .28, cloth}, camera);
-    cube({b.x + .15, b.y - .17, 1.18, .13, .3, .28, cloth}, camera);
-    cube({b.x - .2, b.y - .13 + anim, .14, .16, .25, .59, cloth}, camera);
-    cube({b.x + .04, b.y - .13 - anim, .14, .16, .25, .59, cloth}, camera);
-    cube({b.x - .2, b.y - .21 + anim, .04, .17, .36, .16, 0x263035}, camera);
-    cube({b.x + .04, b.y - .21 - anim, .04, .17, .36, .16, 0x263035}, camera);
-    double angle = b.facing;
-    Vec muzzle = {b.x + cos(angle) * .55, b.y + sin(angle) * .55, 1.3};
-    beam({b.x, b.y, 1.3}, muzzle, .055, 0x202B30, camera);
-    if (b.flash > 0)
-      cube({muzzle.x - .09, muzzle.y - .09, 1.23, .18, .18, .16, 0xFFE2A0,
-            false},
-           camera);
+    drawCharacter(b, int(i), camera);
   }
   activeMaterial = 0;
   for (auto p : game.impacts)
@@ -459,15 +460,9 @@ void drawWorld() {
 #include "viewmodel.hpp"
 void render() {
   drawWorld();
+  drawDroppedWeapons();
   drawViewmodel();
-  if (aimBlend > .85 && game.hp > 0 && (game.weapon == 3 || game.weapon == 4)) {
-    for (int y = 0; y < H; y++)
-      for (int x = 0; x < W; x++)
-        if ((x - W / 2) * (x - W / 2) + (y - H / 2) * (y - H / 2) > 260 * 260)
-          pixels[y * W + x] = 0x10181C;
-    line(W / 2 - 250, H / 2, W / 2 + 250, H / 2, 0x12222A);
-    line(W / 2, H / 2 - 250, W / 2, H / 2 + 250, 0x12222A);
-  }
+  drawScopeLens();
   for (int y = 0; y < H; y++)
     for (int x = 0; x < W; x++) {
       double dx = (x - W * .5) / (W * .5), dy = (y - H * .5) / (H * .5);
@@ -495,19 +490,22 @@ void render() {
   rect(16, 16, 136, 136, 0x111B21);
   for (int y = 0; y < MAP; y++)
     for (int x = 0; x < MAP; x++)
-      rect(20 + x * 4, 20 + y * 4, 3, 3,
+      rect(20 + x * (128 / MAP), 20 + y * (128 / MAP), 128 / MAP - 1,
+           128 / MAP - 1,
            arena.cells[y][x] == '#'    ? 0x64706C
            : game.site(x + .5, y + .5) ? 0xB49B5D
                                        : 0x202C30);
-  int mx = 20 + int(game.x * 4), my = 20 + int(game.y * 4);
+  int mx = 20 + int(game.x * (128. / MAP)),
+      my = 20 + int(game.y * (128. / MAP));
   rect(mx - 2, my - 2, 4, 4, 0x85D7C4);
   line(mx, my, mx + int(cos(game.a) * 8), my + int(sin(game.a) * 8), 0x85D7C4);
   for (auto &b : game.bots)
     if (b.hp > 0 && b.terrorist == game.attacker)
-      rect(20 + int(b.x * 4) - 1, 20 + int(b.y * 4) - 1, 3, 3, 0x75B1E2);
+      rect(20 + int(b.x * (128. / MAP)) - 1, 20 + int(b.y * (128. / MAP)) - 1,
+           3, 3, 0x75B1E2);
   if (game.planted)
-    rect(20 + int(game.bombX * 4) - 2, 20 + int(game.bombY * 4) - 2, 4, 4,
-         0xF35A41);
+    rect(20 + int(game.bombX * (128. / MAP)) - 2,
+         20 + int(game.bombY * (128. / MAP)) - 2, 4, 4, 0xF35A41);
   rect(18, H - 65, 250, 48, 0x19252B);
   rect(W - 280, H - 65, 262, 48, 0x19252B);
   rect(28, H - 25, 120, 3, 0x394447);

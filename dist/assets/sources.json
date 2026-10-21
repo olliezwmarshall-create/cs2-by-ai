@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Lantern",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/15cd02d304e54cb42a4db4eefe719f76190f4b68/Models/Lantern/glTF-Binary/Lantern.glb",
+    "license": "CC0-1.0",
+    "source_sha256": "a79458c4b02d695187a952f23a63b8bf278e7bc3d316a3c2a314f2d6974181f1",
+    "derived_file": "lantern.brm",
+    "derived_sha256": "4bfc862facad19e591f392e607ad8130f4b624fd72816428ccf4d8f8c66099d2",
+    "modifications": "Converted coordinates, normalized height, retained UVs, resized base-color textures to 256 pixels and packed into BRM1."
+  },
+  {
+    "name": "WaterBottle",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/15cd02d304e54cb42a4db4eefe719f76190f4b68/Models/WaterBottle/glTF-Binary/WaterBottle.glb",
+    "license": "CC0-1.0",
+    "source_sha256": "b337e526fd6a162013c2984aeec163f5fbb4f717252724dfc3f3458bd51df94b",
+    "derived_file": "bottle.brm",
+    "derived_sha256": "5f8a350603572ec57e1cdbf376abc55a72236dd612ed1fa731eab170b3e50beb",
+    "modifications": "Converted coordinates, normalized height, retained UVs, resized base-color textures to 256 pixels and packed into BRM1."
+  }
+]

@@ -32,13 +32,19 @@ void rounded(Area r, unsigned color, int radius = 7) {
     ellipse(int(p.x), int(p.y), radius, radius, color);
 }
 void weaponIcon(int x, int y, int gun, unsigned c) {
-  int barrel = gun == 3 ? 125 : gun == 2 ? 65 : 100;
+  if (secondaryGun(gun)) {
+    rect(x + 15, y, gun == 5 ? 80 : 60, 13, c);
+    rect(x + 25, y + 10, 15, 30, c);
+    rect(x + 75, y + 5, 15, 4, c);
+    return;
+  }
+  int barrel = boltGun(gun) ? 125 : gun == 2 || gun == 15 ? 65 : 100;
   rect(x, y, 90, 12, c);
   rect(x + 80, y + 3, barrel - 60, 5, c);
   rect(x - 25, y + 4, 30, 16, c);
   rect(x + 28, y + 8, 12, 30, c);
-  rect(x + 55, y + 10, 14, 25, c);
-  if (gun >= 3) {
+  rect(x + (gun == 10 ? 10 : 55), y + 10, 14, 25, c);
+  if (scopedGun(gun)) {
     rect(x + 25, y - 15, 55, 9, c);
     rect(x + 35, y - 7, 4, 10, c);
     rect(x + 65, y - 7, 4, 10, c);
@@ -46,13 +52,19 @@ void weaponIcon(int x, int y, int gun, unsigned c) {
     rect(x + 70, y - 6, 5, 10, c);
     rect(x + 15, y - 6, 5, 10, c);
   }
+  if (gun == 13)
+    ellipse(x + 50, y + 25, 15, 12, c);
+  if (gun == 8)
+    rect(x + 105, y, 35, 12, c);
+  if (gun == 11 || gun == 12)
+    rect(x + 65, y + 10, 60, 4, c);
 }
 void drawInterface() {
   interfaceText.clear();
   auto page = ui.page;
   if (page == ScreenPage::Play) {
     caption(180, 20, 16,
-            "DOCKYARD / " + std::string(game.attacker ? "T" : "CT"), 0x9FB6B8);
+            "HARBOR / " + std::string(game.attacker ? "T" : "CT"), 0x9FB6B8);
     rounded({W / 2 - 110, 15, 220, 46}, 0x17252B);
     caption(W / 2 - 92, 24, 22, std::to_string(game.alive(true)) + " T",
             0xEBC57B);
@@ -81,17 +93,14 @@ void drawInterface() {
     caption(W - 265, H - 40, 22,
             std::to_string(game.ammo()) + " / " +
                 std::to_string(game.reserve[game.weapon]));
-    caption(180, 120, 12, "ESC MENU   /   B BUY   /   MIDDLE MOUSE UTILITY",
+    caption(180, 120, 12, "ESC MENU / B BUY / MIDDLE: UTILITY / E PICKUP",
             0x8FA5A9);
     int n = 0;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < WEAPON_COUNT; i++)
       if (game.owned[i]) {
         int x = 300 + n * 70;
         rounded({x, H - 54, 64, 36}, i == game.weapon ? 0xC39B58 : 0x203039, 4);
-        caption(x + 10, H - 48, 13,
-                std::to_string(i + 1) + " " +
-                    std::array<std::string, 5>{
-                        {"PST", "AR", "SMG", "SNP", "DMR"}}[i],
+        caption(x + 10, H - 48, 13, secondaryGun(i) ? "PISTOL" : "PRIMARY",
                 i == game.weapon ? 0x14232A : 0xA8B7BB);
         n++;
       }
@@ -99,6 +108,17 @@ void drawInterface() {
       rounded({660, 115 + int(i) * 24, 280, 22}, 0x263139, 3);
       caption(670, 116 + int(i) * 24, 13, game.feed[i], 0xE4CBA4);
     }
+    caption(180, 68, 13,
+            "MATCH " + std::to_string(game.wins) + " : " +
+                std::to_string(game.losses) + " / FIRST TO 7",
+            0xBCA77D);
+    if (game.nearbyDrop() >= 0)
+      caption(300, H - 145, 15,
+              "E: PICK UP " +
+                  std::string(weapons[game.drops[game.nearbyDrop()].gun].name),
+              0xE5C584);
+    if (game.utilityEquipped)
+      caption(300, H - 115, 15, "LEFT CLICK: THROW / Q: WEAPON", 0xE5C584);
     if (game.reload > 0)
       caption(W / 2 - 55, H - 116, 15, "RELOADING", 0xE9C77C);
     if (game.boltCycle > 0)
@@ -119,8 +139,9 @@ void drawInterface() {
     caption(70, 68, 14, "O R I G I N A L   T A C T I C A L   S H O O T E R",
             0xB7CBC8);
     caption(65, 105, 66, "BREACH", 0xF1EBDB);
-    caption(70, 181, 22, "DOCKYARD / TEAM ASSAULT", 0xCDAE73);
-    caption(70, 218, 14, "Two teams. Two sites. One decisive round.", 0xA6BABB);
+    caption(70, 181, 22, "HARBOR / FIRST TO SEVEN", 0xCDAE73);
+    caption(70, 218, 14, "Six-round halves. Larger routes. Harder opposition.",
+            0xA6BABB);
     caption(70, 552, 13,
             "OFFLINE BOTS  /  ORIGINAL 3D ART  /  MOUSE-DRIVEN LOADOUT",
             0x7F9A9E);
@@ -174,15 +195,19 @@ void drawInterface() {
     ellipse(W / 2, 300, 42, 42, 0x293D44);
     caption(W / 2 - 11, 288, 18, std::to_string(game.utilities[game.utility]));
     caption(325, 530, 14,
-            "Scroll cycles utility. G throws the selected grenade.", 0x9BB5B7);
+            "Scroll or hover to select. Left click throws. H quick-throws.",
+            0x9BB5B7);
   }
   if (page == ScreenPage::Result) {
-    caption(295, 130, 14, "ROUND COMPLETE", 0xCDAE73);
-    caption(290, 162, 48, game.won ? "VICTORY" : "DEFEAT",
+    caption(295, 130, 14, game.matchOver ? "MATCH COMPLETE" : "ROUND COMPLETE",
+            0xCDAE73);
+    caption(290, 162, 48,
+            game.matchOver ? (game.matchWon ? "MATCH WON" : "MATCH LOST")
+                           : (game.won ? "ROUND WON" : "ROUND LOST"),
             game.won ? 0xB7D6BC : 0xDEAB91);
     caption(295, 227, 17, game.result);
     caption(295, 262, 16,
-            "MATCH " + std::to_string(game.wins) + " : " +
+            "FIRST TO 7 / " + std::to_string(game.wins) + " : " +
                 std::to_string(game.losses) + "    KILLS " +
                 std::to_string(game.kills) + "    $" +
                 std::to_string(game.money),
@@ -223,12 +248,13 @@ void drawInterface() {
     if (!b.detail.empty())
       caption(b.r.x + 18, b.r.y + (b.r.h > 70 ? b.r.h - 31 : 38), 13, b.detail,
               b.enabled ? 0xA4BBBD : 0x647B82);
-    if (page == ScreenPage::Buy && b.action >= 101 && b.action <= 104) {
+    if (page == ScreenPage::Buy && b.action >= 100 &&
+        b.action < 100 + WEAPON_COUNT) {
       weaponIcon(b.r.x + b.r.w - 172, b.r.y + 54, b.action - 100,
                  b.enabled ? 0xB8C5C4 : 0x5F7075);
       double damage = weapons[b.action - 100].damage / 110.;
-      rect(b.r.x + 18, b.r.y + 58, 120, 3, 0x4E5E61);
-      rect(b.r.x + 18, b.r.y + 58, int(damage * 120), 3, 0xBFA36D);
+      rect(b.r.x + 18, b.r.y + 80, 60, 3, 0x4E5E61);
+      rect(b.r.x + 18, b.r.y + 80, int(damage * 60), 3, 0xBFA36D);
     }
   }
   if (ui.feedbackTime > 0) {
